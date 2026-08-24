@@ -83,6 +83,27 @@ services:
       retries: 10
     networks: [microservices-net]
 
+  order-service:
+    build: ./order-service
+    image: microservices/order-service:latest
+    container_name: order-service
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "8081:8081"
+    depends_on:
+      nacos:
+        condition: service_healthy
+      mysql-order:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    networks: [microservices-net]
+
 networks:
   microservices-net:
     driver: bridge
