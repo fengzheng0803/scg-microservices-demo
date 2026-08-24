@@ -535,6 +535,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ```java
 package com.example.order.service;
 
+import com.example.order.dto.CreateOrderRequest;
 import com.example.order.entity.Order;
 import com.example.order.mapper.OrderMapper;
 import org.junit.jupiter.api.BeforeEach;
