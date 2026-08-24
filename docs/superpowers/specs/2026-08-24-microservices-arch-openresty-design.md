@@ -73,6 +73,7 @@ mysql-order(:3306)   mysql-nacos(:3307)   redis(:6379)   rabbitmq(:5672)
 ### 5.1 基础设施
 
 mysql-order、mysql-nacos、redis 与方案 A §5.1 完全相同；nacos 同方案 B（仅配置中心）。
+> ⚠️ Nacos 3.x 实测形态与 2.x 差异显著（控制台独立端口 8080/宿主机 18080、v3 API、10 张表、无内置默认密码、`MYSQL_SERVICE_DB_PARAM`），编排细节以 [SCG 设计文档](2026-08-24-microservices-arch-scg-design.md) §5.1 的实测备注为准。
 
 **openresty 自定义镜像**（`openresty/Dockerfile`）：`FROM openresty/openresty:1.25-alpine-fat`，挂载 `openresty/nginx.conf` 与 `openresty/lua/`。
 

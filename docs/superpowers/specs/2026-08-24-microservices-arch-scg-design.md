@@ -56,7 +56,7 @@ redis(:6379) ← 网关限流令牌桶存储
 |------|------|------|------|---------|
 | mysql-order | mysql:8.4 | 3306 | 业务库 `order_db` | 1 |
 | mysql-nacos | mysql:8.4 | 3307 | Nacos 专属库 `nacos_config` | 1 |
-| nacos | nacos/nacos-server:v3.0.3 | 8848/9848 | 注册中心 + 配置中心 | 1 |
+| nacos | nacos/nacos-server:v3.0.3 | 8848/9848/18080 | 注册中心 + 配置中心（18080 为 3.x 控制台 UI） | 1 |
 | redis | redis:7-alpine | 6379 | 网关限流令牌桶 | 1 |
 | order-service | 自建 | 8081 | 订单服务 | 1 |
 | gateway | 自建 | 8080 | API 网关 | 1 |
@@ -87,7 +87,7 @@ redis(:6379) ← 网关限流令牌桶存储
 
 **mysql-nacos**：`MYSQL_DATABASE=nacos_config`（utf8mb4）；挂载 `nacos/mysql-schema.sql`（从 `alibaba/nacos` 仓库 3.0.3 tag 拉取：`distribution/conf/mysql-schema.sql`，11 张表）。
 
-**nacos**：`MODE=standalone`、`SPRING_DATASOURCE_PLATFORM=mysql`、`MYSQL_SERVICE_HOST=mysql-nacos`、`MYSQL_SERVICE_PORT=3306`、`MYSQL_SERVICE_DB_NAME=nacos_config`、`MYSQL_SERVICE_USER/PASSWORD`；**3.x 鉴权必配**：`NACOS_AUTH_TOKEN`（≥32 字符 Base64，写入 `.env`）、`NACOS_AUTH_IDENTITY_KEY/VALUE`；healthcheck：`curl /nacos/v1/console/health/readiness`。
+**nacos**（3.0.3 实测形态）：`MODE=standalone`、`SPRING_DATASOURCE_PLATFORM=mysql`、`MYSQL_SERVICE_HOST=mysql-nacos`、`MYSQL_SERVICE_DB_NAME=nacos_config`；**3.x 注意**：① JDBC 参数用 `MYSQL_SERVICE_DB_PARAM`（2.x 的 `MYSQL_SERVICE_PARAM` 无效），必须含 `allowPublicKeyRetrieval=true`（MySQL 8.4 caching_sha2_password）；② 鉴权必配 `NACOS_AUTH_TOKEN`（≥32 字符 Base64）+ `NACOS_AUTH_IDENTITY_KEY/VALUE`；③ **控制台 UI 独立运行在容器 8080**（宿主机映射 18080，8848 不再承载 UI），readiness 在 `8080/v3/console/health/readiness`（v1 路径 410）；④ **3.x 不再内置默认管理员密码**，首次需 `POST /nacos/v3/auth/user/admin` 初始化（持久化 MySQL）；⑤ schema 为 10 张表（移除 2.x 的 config_info_aggr/config_info_beta，新增 config_info_gray）；⑥ 两个 API 入口 contextPath 不同：控制台端口用 `/v3/...`，客户端端口 8848 用 `/nacos/v3/...`。
 
 **redis**：无持久化需求，默认配置即可；healthcheck：`redis-cli ping`。
 
@@ -122,7 +122,7 @@ redis(:6379) ← 网关限流令牌桶存储
 ### 5.4 阶段 1 验收标准
 
 1. `docker compose up --build -d` 后全部容器 healthy
-2. Nacos 控制台 `localhost:8848`（nacos/nacos）看到 order-service、gateway 已注册
+2. Nacos 控制台 `localhost:18080`（nacos/nacos）看到 order-service、gateway 已注册
 3. `curl http://localhost:8080/api/order/orders` 返回 200 列表
 4. 创建订单后连续两次查详情：首次 `X-Cache: MISS`，第二次 `X-Cache: HIT`
 5. 快速循环 curl 触发 429（Redis 令牌桶生效）
