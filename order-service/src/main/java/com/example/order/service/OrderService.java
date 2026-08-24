@@ -6,6 +6,8 @@ import com.example.order.dto.CreateOrderRequest;
 import com.example.order.entity.Order;
 import com.example.order.mapper.OrderMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.ThreadLocalRandom;
@@ -29,10 +31,12 @@ public class OrderService {
         return order;
     }
 
+    @Cacheable(cacheNames = "orders", key = "#id")
     public Order get(Long id) {
         return orderMapper.selectById(id);
     }
 
+    @CacheEvict(cacheNames = "orders", key = "#id")
     public void delete(Long id) {
         orderMapper.deleteById(id);
     }
