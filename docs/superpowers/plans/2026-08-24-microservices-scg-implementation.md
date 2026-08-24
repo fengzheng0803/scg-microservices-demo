@@ -535,7 +535,6 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ```java
 package com.example.order.service;
 
-import com.example.order.dto.CreateOrderRequest;
 import com.example.order.entity.Order;
 import com.example.order.mapper.OrderMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -850,6 +849,8 @@ class CacheConfigTest {
 
         cache.put(1L, first);
         cache.put(2L, second);
+        // Caffeine 容量驱逐异步执行，同步 cleanUp 后再断言
+        ((Cache) cache.getNativeCache()).cleanUp();
 
         assertThat(cache.get(1L)).isNull();
         assertThat(cache.get(2L)).isNotNull();
