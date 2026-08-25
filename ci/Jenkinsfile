@@ -27,9 +27,12 @@ pipeline {
                     # 容器内 git 以 root 运行，而仓库属主是宿主用户，git 会拒绝操作
                     # （"dubious ownership"）——先标记 safe.directory 再执行 git 命令
                     git config --global --add safe.directory "$REPO"
-                    git fetch --prune origin
+                    # 宿主仓库的 origin 是 SSH（git@github.com），容器内 root 没有 github.com 主机密钥，
+                    # 而仓库是公开的——直接用 HTTPS 地址拉取即可，无需凭据、不动 remote 配置
+                    git fetch --prune https://github.com/fengzheng0803/scg-microservices-demo.git feature/scg-microservices
                     git checkout feature/scg-microservices
-                    git pull --ff-only origin feature/scg-microservices
+                    # ff-only：本地超前/有未提交修改时宁可失败，不覆盖宿主工作树
+                    git merge --ff-only FETCH_HEAD
                 '''
             }
         }
