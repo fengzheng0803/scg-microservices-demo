@@ -75,10 +75,11 @@ pipeline {
                     set -e
                     cd $REPO
                     docker compose -f docker-compose.yml up -d
-                    # 等待 6 容器全部 healthy（最多 300s）；'healthy)' 精确匹配，避免 (unhealthy) 含子串误判
+                    # 等待 6 容器全部 healthy（最多 300s）。必须匹配 '(healthy)'（带左括号）：
+                    # "(unhealthy)" 也含 "healthy)" 子串，只匹配 ')' 会把 unhealthy 误判为健康
                     for i in $(seq 1 60); do
                         count=$(docker compose -f docker-compose.yml ps \
-                            --format '{{.Service}} {{.Status}}' | grep -c 'healthy)')
+                            --format '{{.Service}} {{.Status}}' | grep -c '(healthy)')
                         if [ "$count" -eq 6 ]; then
                             echo "阶段 1 六容器全部 healthy"
                             exit 0
