@@ -13,6 +13,7 @@ Nacos(8848/9848, 数据存 mysql-nacos:3307) ｜ mysql-order(3306) ｜ redis(637
 ```bash
 cp .env.example .env   # 修改密码与 NACOS_AUTH_TOKEN（openssl rand -hex 32 | base64 生成）
 docker compose up --build -d
+bash scripts/init-nacos.sh   # 首次/清库后初始化 Nacos 管理员与配置（幂等，可重复执行）
 docker compose ps      # 全部 healthy 后继续
 bash scripts/verify-phase1.sh
 ```
