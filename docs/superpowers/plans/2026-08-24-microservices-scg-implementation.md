@@ -1346,6 +1346,24 @@ docker compose ps      # 全部 healthy 后继续
 bash scripts/verify-phase1.sh
 ```
 
+## 按需启动（单独验证某个服务）
+
+compose 支持按服务名选择拉起，`depends_on` 自动带上依赖链（无需多个 compose 文件）：
+
+| 场景 | 命令 |
+|------|------|
+| 全量拉起 | `docker compose up -d --build` |
+| 只测 order-service | `docker compose up -d --build order-service`（自动带 mysql-order + nacos） |
+| 只测网关链路 | `docker compose up -d --build gateway`（自动带 nacos + redis） |
+| 只起基础设施 | `docker compose up -d mysql-order mysql-nacos nacos redis` |
+
+单独调试某个业务服务（断点开发）：基础设施常驻容器，该服务在 IDE 本地运行并指向宿主机端口：
+
+```bash
+docker compose up -d mysql-order mysql-nacos nacos redis
+mvn spring-boot:run -Dspring-boot.run.arguments="--spring.cloud.nacos.server-addr=localhost:8848 --spring.datasource.url=jdbc:mysql://localhost:3306/order_db"
+```
+
 ## 常用入口
 
 - Nacos 控制台: http://localhost:18080/ （nacos/nacos；3.x 控制台独立端口，8848 仅承载客户端 API）
