@@ -1395,11 +1395,17 @@ mvn spring-boot:run -Dspring-boot.run.arguments="--spring.cloud.nacos.server-add
 
 - [ ] **Step 3: 全量从零验收**
 
+> ⚠️ `down -v` 清空数据卷后 Nacos 配置与管理员密码一并丢失，必须重建（否则 order-service/gateway 因读不到配置起不来）：
+> 1. 等 nacos healthy → 初始化管理员：`POST http://localhost:8848/nacos/v3/auth/user/admin -d 'password=nacos'`
+> 2. 登录拿 token（`POST /nacos/v3/auth/user/login`）→ 重新发布 `order-service.yaml`（Task 2 Step 5 内容）与 `gateway.yaml`（Task 5 Step 2 内容）
+> 3. `docker compose restart order-service gateway`（让服务读到新配置）
+
 Run:
 ```bash
 docker compose down -v
 docker compose up --build -d
 docker compose ps
+# ...执行上方 ⚠️ 三步重建 Nacos 配置...
 bash scripts/verify-phase1.sh
 ```
 Expected: 6 容器全部 healthy；脚本 6 项检查通过（MISS→HIT、出现 429、健康 UP、Nacos 服务列表含 order-service 与 gateway）。
@@ -3356,6 +3362,8 @@ curl http://localhost:8080/api/order/orders -H "Authorization: Bearer $TOKEN"
 ```
 
 - [ ] **Step 3: 全量从零验收**
+
+> ⚠️ `down -v` 清空数据卷后需重建 Nacos 状态（管理员密码初始化 + 重新发布 order-service.yaml/gateway.yaml/auth-service.yaml + JWT 密钥回填 + 重启业务服务），步骤同 Task 6 Step 3 的 ⚠️ 块；JWT 密钥需与 verify-full.sh 的预期一致（用 Task 11 生成的同一密钥重新发布）。
 
 Run:
 ```bash
