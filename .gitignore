@@ -4,3 +4,5 @@ target/
 .idea/
 .vscode/
 .superpowers/
+.venv/
+__pycache__/

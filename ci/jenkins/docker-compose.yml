@@ -1,0 +1,44 @@
+# Jenkins 独立 compose：按需启停，不随主微服务栈（/docker-compose.yml）启动/关闭
+# 启动：  docker compose -f ci/jenkins/docker-compose.yml up -d
+# 停止：  docker compose -f ci/jenkins/docker-compose.yml stop
+name: jenkins
+
+services:
+  jenkins:
+    build: .
+    image: microservices/jenkins:lts
+    container_name: jenkins
+    ports:
+      - "8088:8080"   # 宿主 8088 → 容器 8080（8080 已被 gateway、18080 已被 Nacos 控制台占用）
+    volumes:
+      - jenkins_home:/var/jenkins_home          # 持久化：任务、插件、凭据、构建历史
+      - /var/run/docker.sock:/var/run/docker.sock  # 挂宿主 daemon：Jenkins 要操作宿主 Docker 起 compose/跑测试
+      # 仓库绑定挂载（流水线数据面）：Jenkins 容器内操作的是 /home/fengzheng/new4 宿主同一路径。
+      # 为什么必须挂同路径而不是 /repo：
+      #   docker.sock 指到宿主 daemon，daemon 只见宿主路径。流水线里的
+      #   `docker compose -f ... build/up` 会把 compose 文件目录下的相对路径
+      #   （build: ./order-service、./sql/*.sql）解析成绝对路径交给 daemon——
+      #   若容器内挂在 /repo，daemon 收到 /repo/order-service 找不到目录，构建/部署必失败；
+      #   挂在宿主同路径，容器内读文件、daemon 找目录两边路径完全一致，零翻译。
+      #   同理 `docker run -v /home/fengzheng/new4:/app` 的 -v 源路径是 daemon 解析的宿主路径。
+      # 学习场景接受写挂载：mvn/pytest 要在仓库树里写 target/、results.xml。
+      - /home/fengzheng/new4:/home/fengzheng/new4:rw
+    environment:
+      - TZ=Asia/Shanghai    # 时区对齐宿主机，日志/构建时间戳不偏差（不引入任何新密钥）
+    user: root
+    # trade-off：root 运行仅为绕过 docker.sock 的 root 属主权限（本机 srw-rw---- root docker）。
+    # 学习场景可接受；生产应给 docker 组内专用用户 + 最小挂载权限（如只读、限定容器）。
+    restart: unless-stopped
+    networks:
+      - microservices-net
+
+networks:
+  microservices-net:
+    # 复用主 compose 已建的桥接网：容器内可用 http://gateway:8080、http://nacos:8848 直连微服务栈
+    external: true
+    # 主 compose 顶层声明了 name: microservices，实际网络名是 microservices_microservices-net
+    # （external 网络以 Docker 实际名称为准，键名仅是 compose 内别名）
+    name: microservices_microservices-net
+
+volumes:
+  jenkins_home:
