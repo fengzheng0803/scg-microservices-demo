@@ -1,0 +1,132 @@
+// ci/Jenkinsfile —— 微服务最小集合的 CI 流水线（块 3）
+// 关键环境事实（务必先读 ci/jenkins/docker-compose.yml 的 volume 注释）：
+//   1. Jenkins 容器挂载 docker.sock 操作宿主 daemon，daemon 只认宿主路径
+//   2. 仓库已绑定挂载到容器内"宿主同路径" /home/fengzheng/new4，
+//      所以流水线所有 docker 命令（-v 源路径、compose 的 -f 与相对路径）直接用宿主路径，
+//      容器内读文件、daemon 找目录两边一致，零翻译
+//   3. Jenkins 镜像不装 maven：单测用 maven 官方镜像容器跑
+//   4. 系统测试在 Jenkins 容器内跑（已装 pytest/requests/pymysql），经 microservices-net 直连网关
+pipeline {
+    agent any
+
+    environment {
+        // 挂载的宿主仓库路径（机器相关，与 ci/jenkins/docker-compose.yml 的 volume 保持一致）
+        REPO = '/home/fengzheng/new4'
+        // 系统测试在 Jenkins 容器内运行：用服务名经 microservices-net 直连，不走宿主端口
+        BASE_URL = 'http://gateway:8080'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // SCM 拉取的是本 Jenkinsfile 所在仓库；构建要操作的宿主工作树（$REPO）
+                // 也同步到远程分支同一 commit，保证"构建的代码 == 检出的代码"
+                // （ff-only：若宿主工作树有未提交修改/本地超前，宁可失败也不覆盖）
+                sh '''
+                    cd $REPO
+                    git fetch --prune origin
+                    git checkout feature/scg-microservices
+                    git pull --ff-only origin feature/scg-microservices
+                '''
+            }
+        }
+
+        stage('单元测试') {
+            // Jenkins 镜像不装 maven，用 maven 官方镜像容器跑 order-service 单测：
+            //   -v $REPO:/app 挂载仓库（-v 源路径由宿主 daemon 解析，正好就是宿主仓库路径）
+            //   -w /app/order-service 进到服务目录；target/ 写在宿主仓库树里（已 gitignore）
+            // 只测 order-service：阶段 2/3（user-service、Feign、认证等）尚未落地，
+            // 后续服务就绪后在 -w 参数处逐个补跑即可。
+            steps {
+                sh '''
+                    docker run --rm \
+                        -v $REPO:/app \
+                        -w /app/order-service \
+                        maven:3.9-eclipse-temurin-21 \
+                        mvn -q test
+                '''
+            }
+        }
+
+        stage('构建镜像') {
+            // 经 docker.sock 操作宿主 daemon 构建 order-service 镜像；
+            // compose 文件用宿主同路径，build 上下文 ./order-service 解析后 daemon 能找到
+            steps {
+                sh 'cd $REPO && docker compose -f docker-compose.yml build order-service'
+            }
+        }
+
+        stage('部署/确保栈运行') {
+            // docker compose up -d：确保阶段 1 六容器在跑且 healthy。
+            // 若镜像有更新，compose 按容器 label 配置哈希比对（与宿主 `docker compose up` 产出一致，
+            // 已验证 config_files 标签相同），只会 recreate order-service，其余容器不动。
+            steps {
+                sh '''
+                    set -e
+                    cd $REPO
+                    docker compose -f docker-compose.yml up -d
+                    # 等待 6 容器全部 healthy（最多 300s）；'healthy)' 精确匹配，避免 (unhealthy) 含子串误判
+                    for i in $(seq 1 60); do
+                        count=$(docker compose -f docker-compose.yml ps \
+                            --format '{{.Service}} {{.Status}}' | grep -c 'healthy)')
+                        if [ "$count" -eq 6 ]; then
+                            echo "阶段 1 六容器全部 healthy"
+                            exit 0
+                        fi
+                        sleep 5
+                    done
+                    echo "超时：仍有容器未 healthy"
+                    docker compose -f docker-compose.yml ps
+                    exit 1
+                '''
+            }
+        }
+
+        stage('系统测试') {
+            // 在 Jenkins 容器内跑 ci/tests 系统测试套件（块 1 交付，镜像已装 pytest/requests/pymysql）。
+            // --junitxml 直接写 $WORKSPACE（jenkins_home 卷内），供下一 stage 的 junit 步骤读取发布
+            // （若写在 $REPO 宿主树里，junit 步骤读不到——它只认 workspace 相对路径）
+            steps {
+                sh 'cd $REPO/ci/tests && python3 -m pytest -v --junitxml="$WORKSPACE/ci/tests/results.xml"'
+            }
+        }
+
+        stage('发布报告') {
+            // pytest 的 JUnit XML → 构建页"测试结果趋势"（JUnit 插件）
+            steps {
+                junit 'ci/tests/results.xml'
+            }
+        }
+    }
+
+    post {
+        always {
+            // 清理兜底（可选）：测试套件自身 teardown 已逐个删除本构建创建的订单；
+            // 这里再兜底删一次测试专用 userId 的残留订单，避免多次运行后 DB 堆积。
+            // catchError 保证清理失败绝不改变构建结果（SUCCESS 仍 SUCCESS）。
+            catchError(buildResult: 'SUCCESS', stageResult: 'SUCCESS') {
+                sh '''
+                    cd $REPO
+                    export MYSQL_ROOT_PASSWORD=$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' .env)
+                    python3 - <<'PYEOF'
+import os
+import pymysql
+
+try:
+    conn = pymysql.connect(host="mysql-order", port=3306, user="root",
+                           password=os.environ["MYSQL_ROOT_PASSWORD"],
+                           database="order_db", connect_timeout=5)
+    with conn.cursor() as cur:
+        # 覆盖 conftest 默认 10001 与各测试自选 id（77001/77002/88001）
+        n = cur.execute("DELETE FROM orders WHERE user_id IN (10001, 77001, 77002, 88001)")
+    conn.commit()
+    conn.close()
+    print(f"清理兜底：删除残留测试订单 {n} 条")
+except Exception as e:
+    print(f"清理兜底跳过（非致命）：{e}")
+PYEOF
+                '''
+            }
+        }
+    }
+}

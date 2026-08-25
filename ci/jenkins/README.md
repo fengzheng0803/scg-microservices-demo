@@ -44,7 +44,7 @@ docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 
 安装较慢属正常，可稍等或直接"Continue"后到 *系统管理 → 插件管理* 补装。
 
-## 创建 Pipeline 作业（对接块 3 的 ci/Jenkinsfile）
+## 创建 Pipeline 作业（对接 ci/Jenkinsfile）
 
 1. 首页 → **新建任务** → 名称 `scg-microservices-ci` → 类型 **Pipeline** → OK
 2. **Pipeline** 区块：
@@ -52,8 +52,24 @@ docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
    - SCM: **Git**
    - Repository URL: `https://github.com/fengzheng0803/scg-microservices-demo.git`
    - Branches to build: `feature/scg-microservices`
-   - **Script Path: `ci/Jenkinsfile`**（块 3 会交付该文件，先在仓库放好占位即可）
+   - **Script Path: `ci/Jenkinsfile`**（块 3 交付；前提：分支已 push 到 GitHub，公开仓库无需凭据）
 3. 保存后点 **立即构建**；构建日志在 *Build History → #1 → Console Output*
+4. 构建成功后，`系统测试` stage 的 JUnit XML 会上到 *构建页 → 测试结果趋势*（9 个用例）
+
+> **自动化建作业（块 3 验证用，不用浏览器 UI）**：等首次登录完成后，REST 两步即可，
+> 无需手点向导（详见块 3 报告 `jenkins-3-report.md`）：
+>
+> ```bash
+> # 1. 造作业（config.xml 为 flow-definition + CpsScmFlowDefinition，SCM 指向公开仓库）
+> curl --noproxy '*' -u admin:<密码> -H "Jenkins-Crumb: $(curl --noproxy '*' -u admin:<密码> -s http://localhost:8088/crumbIssuer/api/json | jq -r .crumb)" \
+>   -X POST -H "Content-Type: application/xml" --data-binary @config.xml \
+>   "http://localhost:8088/createItem?name=scg-microservices-ci"
+> # 2. 触发构建
+> curl --noproxy '*' -u admin:<密码> -H "Jenkins-Crumb: <同上>" -X POST \
+>   "http://localhost:8088/job/scg-microservices-ci/build"
+> ```
+>
+> 用 CLI 同理：`jenkins-cli.jar create-job scg-microservices-ci < config.xml`（需宿主装 Java，本机走 REST）。
 
 ## 内存验证
 

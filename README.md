@@ -43,6 +43,34 @@ mvn spring-boot:run -Dspring-boot.run.arguments="--spring.cloud.nacos.server-add
 - 网关: http://localhost:8080/api/order/orders
 - WSL2 内存建议 ≥5GB
 
+## Jenkins CI
+
+本地 Jenkins（独立 compose，按需启停，不随微服务栈启动）跑 `ci/Jenkinsfile` 流水线：
+单元测试 → 构建镜像 → 部署 → 系统测试（`ci/tests/`）→ 发布报告。
+
+**环境就绪与手动配置步骤见 [`ci/jenkins/README.md`](ci/jenkins/README.md)**（解锁密码、插件安装、UI 建作业），
+仓库根只需知道：启动 Jenkins、在 UI 建一个 SCM Git 指向 `feature/scg-microservices`、Script Path 填 `ci/Jenkinsfile`。
+
+### 流水线 stage 说明
+
+| Stage | 干什么 | 依赖 |
+|-------|--------|------|
+| Checkout | 同步挂载的宿主仓库到远程分支（ff-only） | 已 push 的 `feature/scg-microservices` |
+| 单元测试 | `docker run maven:3.9-eclipse-temurin-21 mvn test`（Jenkins 镜像不装 maven），当前只测 order-service | 容器可访问外网（拉镜像/依赖） |
+| 构建镜像 | `docker compose build order-service`（经 docker.sock 操作宿主 daemon） | 上一步通过 |
+| 部署/确保栈运行 | `docker compose up -d` + 等阶段 1 六容器 healthy（≤300s） | 构建成功 |
+| 系统测试 | 容器内跑 `ci/tests` pytest 套件（9 个用例，BASE_URL=http://gateway:8080） | 六容器 healthy |
+| 发布报告 | junit 步骤把 pytest 的 JUnit XML 上到构建页测试趋势 | 系统测试产出 XML |
+
+### 关键实现说明
+
+- Jenkins 容器挂载 `docker.sock` 操作宿主 Docker，但 daemon 只认宿主路径；
+  因此 Jenkins compose 把仓库绑定挂载到**容器内宿主同路径** `/home/fengzheng/new4`
+  （不是 `/repo`——compose 的相对路径经 daemon 解析，挂在别的路径构建必失败），
+  流水线所有 compose/mvn/pytest 都在该路径下操作。
+- 系统测试的 pytest 在 Jenkins 容器内跑，经 `microservices-net` 直连 `http://gateway:8080`（环境变量 `BASE_URL`）。
+- `post { always }` 兜底清理测试专用 userId 残留订单，失败不影响构建结果。
+
 ## 阶段进度
 
 - [x] 阶段 1 最小集合：注册/配置中心、网关路由、本地缓存、网关限流
