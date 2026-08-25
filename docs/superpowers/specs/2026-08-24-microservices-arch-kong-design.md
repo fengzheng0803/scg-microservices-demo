@@ -67,6 +67,7 @@ mysql-order(:3306)   mysql-nacos(:3307)   redis(:6379)   rabbitmq(:5672)
 ### 5.1 基础设施
 
 mysql-order、mysql-nacos、redis 与方案 A §5.1 完全相同。
+> ⚠️ Nacos 3.x 实测形态与 2.x 差异显著（控制台独立端口 8080/宿主机 18080、v3 API、10 张表、无内置默认密码、`MYSQL_SERVICE_DB_PARAM`），编排细节以 [SCG 设计文档](2026-08-24-microservices-arch-scg-design.md) §5.1 的实测备注为准——本方案与 C 方案沿用同一基础设施编排。
 
 **nacos**：启动参数同方案 A，但**业务服务不配置 nacos-discovery**——Nacos 仅承担配置中心（保留动态配置热刷新学习主题）。
 

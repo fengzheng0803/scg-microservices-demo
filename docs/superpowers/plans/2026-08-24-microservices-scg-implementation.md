@@ -15,7 +15,7 @@
 - 所有 commit message 末尾必须带 `Co-Authored-By: Claude <noreply@anthropic.com>`
 - 版本锁定：Boot 3.5.4 / Cloud 2025.0.0 / SCA 2025.0.0.0 / Nacos Server v3.0.3 / MyBatis-Plus 3.5.12 / jjwt 0.12.6 / mysql:8.4 / redis:7-alpine / rabbitmq:3-management / nginx:1.27-alpine / maven:3.9-eclipse-temurin-21 / eclipse-temurin:21-jre
 - Nacos Client 3.0.3 ↔ Server v3.0.3 必须严格对应；SCA 2025 配置一律用 `spring.config.import`，**禁止**引入 bootstrap
-- 端口约定：nginx 80、gateway 8080、order-service 8081、user-service 8082、auth-service 8083、Nacos 8848/9848、mysql-order 3306、mysql-nacos 3307、Redis 6379、RabbitMQ 5672/15672
+- 端口约定：nginx 80、gateway 8080、order-service 8081、user-service 8082、auth-service 8083、Nacos 8848/9848（客户端与管理 API，路径前缀 `/nacos/v3/`）+ 18080（3.x 控制台 UI，readiness 在 `/v3/console/health/readiness`，管理 API 请走 8848）、mysql-order 3306、mysql-nacos 3307、Redis 6379、RabbitMQ 5672/15672
 - 测试策略：纯单元测试（JUnit 5 + Mockito，不启动 Spring 上下文、不依赖中间件），在 `order-service` 等模块目录下用 `docker run --rm -v "$PWD":/app -w /app maven:3.9-eclipse-temurin-21 mvn -q test` 运行（本机无需装 Maven/JDK）；集成行为用 curl 验收
 - 服务间通过 compose 服务名互访（同网络 `microservices-net`）；启动顺序靠 `depends_on: condition: service_healthy`
 - 敏感值（MySQL 密码、NACOS_AUTH_TOKEN、JWT 密钥、RabbitMQ 密码）全部走 `.env`（gitignored）+ `.env.example`（提交）；业务服务容器内以环境变量注入
@@ -52,11 +52,11 @@ MYSQL_ROOT_PASSWORD=change-me
 NACOS_AUTH_TOKEN=change-me-to-a-base64-string-at-least-32-chars
 ```
 
-生成 `.env`（注意：`.env` 是纯键值文件，不能写 shell 表达式，用命令生成后写入）：
+生成 `.env`（注意：`.env` 是纯键值文件，不能写 shell 表达式，用命令生成后写入；GNU base64 默认 76 字符换行会破坏键值对，必须 `-w 0`）：
 ```bash
 cp .env.example .env
 sed -i 's/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=root123456/' .env
-NACOS_TOKEN=$(openssl rand -hex 32 | base64)
+NACOS_TOKEN=$(openssl rand -hex 32 | base64 -w 0)
 sed -i "s|^NACOS_AUTH_TOKEN=.*|NACOS_AUTH_TOKEN=$NACOS_TOKEN|" .env
 ```
 
@@ -150,6 +150,9 @@ services:
       MYSQL_SERVICE_DB_NAME: nacos_config
       MYSQL_SERVICE_USER: root
       MYSQL_SERVICE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      # 3.x 变量名为 MYSQL_SERVICE_DB_PARAM（2.x 的 MYSQL_SERVICE_PARAM 无效）；
+      # allowPublicKeyRetrieval 是 MySQL 8.4 caching_sha2_password 必需
+      MYSQL_SERVICE_DB_PARAM: characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       NACOS_AUTH_ENABLE: "true"
       NACOS_AUTH_TOKEN: ${NACOS_AUTH_TOKEN}
       NACOS_AUTH_IDENTITY_KEY: nacos
@@ -157,11 +160,13 @@ services:
     ports:
       - "8848:8848"
       - "9848:9848"
+      - "18080:8080"   # 3.x 控制台独立运行在容器 8080；宿主机映射 18080（8080 留给 gateway）
     depends_on:
       mysql-nacos:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/v1/console/health/readiness"]
+      # 3.x readiness 迁移到控制台端口 8080 的 v3 路径（v1 路径返回 410）
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v3/console/health/readiness"]
       interval: 15s
       timeout: 5s
       retries: 30
@@ -203,10 +208,16 @@ Expected: 4 个容器最终全部 `healthy`（Nacos 首次启动约 1-2 分钟�
 Run:
 ```bash
 docker exec mysql-order mysql -uroot -proot123456 -e "SHOW TABLES FROM order_db;"
-docker exec mysql-nacos mysql -uroot -proot123456 -e "SHOW TABLES FROM nacos_config;" | head -15
-curl -fs http://localhost:8848/nacos/v1/console/health/readiness
+docker exec mysql-nacos mysql -uroot -proot123456 -e "SHOW TABLES FROM nacos_config;"
+curl -fs http://localhost:18080/v3/console/health/readiness
 ```
-Expected: `order_db` 含 orders/users 两张表；`nacos_config` 含 config_info 等 11 张表；readiness 返回 `{"status":"UP"...}` 类 JSON。浏览器打开 `http://localhost:8848/nacos`，用 `nacos/nacos` 登录成功。
+Expected: `order_db` 含 orders/users 两张表；`nacos_config` 含 config_info 等 **10 张表**（3.0.3 官方 schema 已移除 2.x 的 config_info_aggr/config_info_beta，新增 config_info_gray）；readiness 返回 `{"code":0,...}` 类 JSON。
+
+**初始化 3.x 管理员密码（一次性，持久化在 MySQL）**——3.x 不再内置 nacos/nacos：
+```bash
+curl -s -X POST 'http://localhost:8848/nacos/v3/auth/user/admin' -d 'password=nacos'
+```
+Expected: 返回 `{"code":0,...,"data":{"username":"nacos"...}}`。随后浏览器打开 `http://localhost:18080/`（3.x 控制台独立端口，8848 不再承载 UI），用 `nacos/nacos` 登录成功。
 
 - [ ] **Step 6: Commit**
 
@@ -301,6 +312,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
       <groupId>com.baomidou</groupId>
       <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
     </dependency>
+    <!-- 3.5.9+ 分页插件拆分到独立 artifact，PaginationInnerInterceptor 必需（版本由 mybatis-plus-bom 管理） -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-jsqlparser</artifactId>
+    </dependency>
     <dependency>
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>
@@ -355,7 +371,7 @@ spring:
       password: nacos
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://mysql-order:3306/order_db?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://mysql-order:3306/order_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: ${MYSQL_ROOT_PASSWORD}
 
@@ -437,20 +453,20 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
 - [ ] **Step 5: 在 Nacos 发布 order-service.yaml 配置**
 
-Run（Nacos 3.x 鉴权后需带 accessToken；若 curl 401，改为浏览器控制台手动新建配置）：
+Run（Nacos 3.x 的 v3 API：登录 `/nacos/v3/auth/user/login`、发布 `/nacos/v3/admin/cs/config`，参数用 `groupName` 而非 2.x 的 `group`；若 curl 失败，改为浏览器控制台 http://localhost:18080 手动新建配置）：
 ```bash
-TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v1/auth/login' \
+TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v3/auth/user/login' \
   -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
-curl -s -X POST 'http://localhost:8848/nacos/v1/cs/configs' \
+curl -s -X POST 'http://localhost:8848/nacos/v3/admin/cs/config' \
   -H "accessToken: $TOKEN" \
   --data-urlencode 'dataId=order-service.yaml' \
-  --data-urlencode 'group=DEFAULT_GROUP' \
+  --data-urlencode 'groupName=DEFAULT_GROUP' \
   --data-urlencode 'content=order:
   cache:
     ttl: 10s
     max-size: 100'
 ```
-Expected: 返回 `true`。浏览器 Nacos 控制台"配置管理→配置列表"可见 `order-service.yaml`（ttl 设 10s 是为了验收时能等到过期）。
+Expected: 返回 `{"code":0,...,"data":true}`。浏览器 Nacos 控制台（http://localhost:18080）"配置管理→配置列表"可见 `order-service.yaml`（ttl 设 10s 是为了验收时能等到过期）。
 
 - [ ] **Step 6: compose 追加 order-service 并启动**
 
@@ -490,10 +506,10 @@ Expected: order-service 最终 healthy（首次构建镜像约 2-5 分钟）。
 Run:
 ```bash
 curl -s http://localhost:8081/actuator/health
-TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v1/auth/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v3/auth/user/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
 curl -s -H "accessToken: $TOKEN" 'http://localhost:8848/nacos/v1/ns/service/list?pageNo=1&pageSize=10'
 ```
-Expected: health 返回 `{"status":"UP"}`；服务列表含 `order-service`（healthyInstanceCount=1）。浏览器控制台"服务管理→服务列表"同样可见。
+Expected: health 返回 `{"status":"UP"}`；服务列表含 `order-service`（healthyInstanceCount=1）。**注册验证的权威判据是浏览器控制台** http://localhost:18080 的"服务管理→服务列表"出现 order-service 且健康实例=1；若 v1 ns 接口在 3.x 下返回 410/404，以控制台为准（客户端与注册中心的 API 版本由 SCA client 3.0.3 自动协商，不影响服务注册本身）。
 
 - [ ] **Step 8: Commit**
 
@@ -833,6 +849,8 @@ class CacheConfigTest {
 
         cache.put(1L, first);
         cache.put(2L, second);
+        // Caffeine 容量驱逐异步执行，同步 cleanUp 后再断言
+        ((Cache) cache.getNativeCache()).cleanUp();
 
         assertThat(cache.get(1L)).isNull();
         assertThat(cache.get(2L)).isNotNull();
@@ -978,11 +996,11 @@ Expected: MISS → HIT →（11 秒后）MISS →（删除后）404 且无 HIT�
 
 - [ ] **Step 7: 验证 Nacos 热刷新**
 
-Run（把 ttl 从 10s 改成 3s，Nacos 控制台操作或 curl）：
+Run（把 ttl 从 10s 改成 3s，Nacos 控制台 http://localhost:18080 操作或 v3 API）：
 ```bash
-TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v1/auth/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
-curl -s -X POST 'http://localhost:8848/nacos/v1/cs/configs' -H "accessToken: $TOKEN" \
-  --data-urlencode 'dataId=order-service.yaml' --data-urlencode 'group=DEFAULT_GROUP' \
+TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v3/auth/user/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+curl -s -X POST 'http://localhost:8848/nacos/v3/admin/cs/config' -H "accessToken: $TOKEN" \
+  --data-urlencode 'dataId=order-service.yaml' --data-urlencode 'groupName=DEFAULT_GROUP' \
   --data-urlencode 'content=order:
   cache:
     ttl: 3s
@@ -1070,6 +1088,17 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
       <groupId>com.alibaba.cloud</groupId>
       <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
     </dependency>
+    <!-- spring.config.import: nacos:gateway.yaml 必需：nacos-config starter 提供 ConfigDataLoader，
+         仅 discovery starter 时启动报 "Config data resource does not exist" -->
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+    </dependency>
+    <!-- 路由 uri 用 lb://order-service 必需：ReactiveLoadBalancerClientFilter 来自 loadbalancer starter -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
@@ -1111,20 +1140,24 @@ spring:
       server-addr: nacos:8848
       username: nacos
       password: nacos
+    # SCG 4.3.0（Spring Cloud 2025.0.0）属性前缀已迁移到 spring.cloud.gateway.server.webflux；
+    # 旧前缀 routes 靠兼容层暂时重映射，但 default-filters 不在重映射列表（静默不绑定），必须用新前缀
     gateway:
-      routes:
-        - id: order-service
-          uri: lb://order-service
-          predicates:
-            - Path=/api/order/**
-          filters:
-            - StripPrefix=1      # /api/order/orders -> order-service 的 /orders
-      default-filters:
-        - name: RequestRateLimiter
-          args:
-            redis-rate-limiter.replenishRate: 10
-            redis-rate-limiter.burstCapacity: 20
-            key-resolver: "#{@ipKeyResolver}"
+      server:
+        webflux:
+          routes:
+            - id: order-service
+              uri: lb://order-service
+              predicates:
+                - Path=/api/order/**
+              filters:
+                - StripPrefix=2    # 剥掉 /api + /order 两段：/api/order/orders -> /orders
+          default-filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                key-resolver: "#{@ipKeyResolver}"
   data:
     redis:
       host: redis
@@ -1197,14 +1230,14 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
 Run:
 ```bash
-TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v1/auth/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
-curl -s -X POST 'http://localhost:8848/nacos/v1/cs/configs' -H "accessToken: $TOKEN" \
-  --data-urlencode 'dataId=gateway.yaml' --data-urlencode 'group=DEFAULT_GROUP' \
+TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v3/auth/user/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+curl -s -X POST 'http://localhost:8848/nacos/v3/admin/cs/config' -H "accessToken: $TOKEN" \
+  --data-urlencode 'dataId=gateway.yaml' --data-urlencode 'groupName=DEFAULT_GROUP' \
   --data-urlencode 'content=logging:
   level:
     org.springframework.cloud.gateway: INFO'
 ```
-Expected: 返回 `true`。
+Expected: 返回 `{"code":0,...,"data":true}`。
 
 - [ ] **Step 3: compose 追加 gateway 并启动**
 
@@ -1281,8 +1314,8 @@ echo "== 1. 容器状态 =="
 docker compose ps
 
 echo "== 2. Nacos 服务注册 =="
-TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v1/auth/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
-curl -s -H "accessToken: $TOKEN" 'http://localhost:8848/nacos/v1/ns/service/list?pageNo=1&pageSize=10'
+TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v3/auth/user/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+curl -s -H "accessToken: $TOKEN" 'http://localhost:8848/nacos/v1/ns/service/list?pageNo=1&pageSize=10' || true
 echo ""
 
 echo "== 3. 经网关创建订单 =="
@@ -1328,9 +1361,27 @@ docker compose ps      # 全部 healthy 后继续
 bash scripts/verify-phase1.sh
 ```
 
+## 按需启动（单独验证某个服务）
+
+compose 支持按服务名选择拉起，`depends_on` 自动带上依赖链（无需多个 compose 文件）：
+
+| 场景 | 命令 |
+|------|------|
+| 全量拉起 | `docker compose up -d --build` |
+| 只测 order-service | `docker compose up -d --build order-service`（自动带 mysql-order + nacos） |
+| 只测网关链路 | `docker compose up -d --build gateway`（自动带 nacos + redis） |
+| 只起基础设施 | `docker compose up -d mysql-order mysql-nacos nacos redis` |
+
+单独调试某个业务服务（断点开发）：基础设施常驻容器，该服务在 IDE 本地运行并指向宿主机端口：
+
+```bash
+docker compose up -d mysql-order mysql-nacos nacos redis
+mvn spring-boot:run -Dspring-boot.run.arguments="--spring.cloud.nacos.server-addr=localhost:8848 --spring.datasource.url=jdbc:mysql://localhost:3306/order_db"
+```
+
 ## 常用入口
 
-- Nacos 控制台: http://localhost:8848/nacos （nacos/nacos）
+- Nacos 控制台: http://localhost:18080/ （nacos/nacos；3.x 控制台独立端口，8848 仅承载客户端 API）
 - 订单服务: http://localhost:8081/orders
 - 网关: http://localhost:8080/api/order/orders
 - WSL2 内存建议 ≥5GB
@@ -1344,11 +1395,17 @@ bash scripts/verify-phase1.sh
 
 - [ ] **Step 3: 全量从零验收**
 
+> ⚠️ `down -v` 清空数据卷后 Nacos 配置与管理员密码一并丢失，必须重建（否则 order-service/gateway 因读不到配置起不来）：
+> 1. 等 nacos healthy → 初始化管理员：`POST http://localhost:8848/nacos/v3/auth/user/admin -d 'password=nacos'`
+> 2. 登录拿 token（`POST /nacos/v3/auth/user/login`）→ 重新发布 `order-service.yaml`（Task 2 Step 5 内容）与 `gateway.yaml`（Task 5 Step 2 内容）
+> 3. `docker compose restart order-service gateway`（让服务读到新配置）
+
 Run:
 ```bash
 docker compose down -v
 docker compose up --build -d
 docker compose ps
+# ...执行上方 ⚠️ 三步重建 Nacos 配置...
 bash scripts/verify-phase1.sh
 ```
 Expected: 6 容器全部 healthy；脚本 6 项检查通过（MISS→HIT、出现 429、健康 UP、Nacos 服务列表含 order-service 与 gateway）。
@@ -1533,7 +1590,7 @@ spring:
       password: nacos
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://mysql-order:3306/order_db?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://mysql-order:3306/order_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: ${MYSQL_ROOT_PASSWORD}
 
@@ -2428,7 +2485,7 @@ spring:
       password: nacos
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://mysql-order:3306/order_db?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://mysql-order:3306/order_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: ${MYSQL_ROOT_PASSWORD}
 
@@ -2634,14 +2691,14 @@ Run（JWT 密钥用 openssl 生成，与 Task 12 gateway 共用同一值）：
 ```bash
 JWT_SECRET=$(openssl rand -hex 32)
 echo "生成的 JWT 密钥（记住它，Task 12 要再用一次）: $JWT_SECRET"
-TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v1/auth/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
-curl -s -X POST 'http://localhost:8848/nacos/v1/cs/configs' -H "accessToken: $TOKEN" \
-  --data-urlencode 'dataId=auth-service.yaml' --data-urlencode 'group=DEFAULT_GROUP' \
+TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v3/auth/user/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+curl -s -X POST 'http://localhost:8848/nacos/v3/admin/cs/config' -H "accessToken: $TOKEN" \
+  --data-urlencode 'dataId=auth-service.yaml' --data-urlencode 'groupName=DEFAULT_GROUP' \
   --data-urlencode "content=auth:
   jwt:
     secret: $JWT_SECRET"
 ```
-Expected: 返回 `true`。
+Expected: 返回 `{"code":0,...,"data":true}`。（Nacos 3.x 实测：管理 API 在 8848 端口 `/nacos/v3/...` 前缀下；18080 控制台端口只承载 UI 与 readiness，其上的管理 API 会 404。）
 
 - [ ] **Step 6: compose 追加 auth-service 并启动验证**
 
@@ -2875,19 +2932,19 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
 
 - [ ] **Step 5: 发布 gateway.yaml（含与 auth-service 相同的 JWT 密钥）+ 网关加 auth 路由**
 
-`gateway/src/main/resources/application.yml` 的 `spring.cloud.gateway.routes` 追加一条（auth-service 控制器映射的就是 `/api/auth`，**不加** StripPrefix）：
+`gateway/src/main/resources/application.yml` 的 `spring.cloud.gateway.server.webflux.routes` 追加一条（auth-service 控制器映射的就是 `/api/auth`，**不加** StripPrefix）：
 ```yaml
-        - id: auth-service
-          uri: lb://auth-service
-          predicates:
-            - Path=/api/auth/**
+            - id: auth-service
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/auth/**
 ```
 
 Run（`$JWT_SECRET` 用 Task 11 Step 5 生成的同一个值）：
 ```bash
-TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v1/auth/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
-curl -s -X POST 'http://localhost:8848/nacos/v1/cs/configs' -H "accessToken: $TOKEN" \
-  --data-urlencode 'dataId=gateway.yaml' --data-urlencode 'group=DEFAULT_GROUP' \
+TOKEN=$(curl -s -X POST 'http://localhost:8848/nacos/v3/auth/user/login' -d 'username=nacos&password=nacos' | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+curl -s -X POST 'http://localhost:8848/nacos/v3/admin/cs/config' -H "accessToken: $TOKEN" \
+  --data-urlencode 'dataId=gateway.yaml' --data-urlencode 'groupName=DEFAULT_GROUP' \
   --data-urlencode "content=logging:
   level:
     org.springframework.cloud.gateway: INFO
@@ -3305,6 +3362,8 @@ curl http://localhost:8080/api/order/orders -H "Authorization: Bearer $TOKEN"
 ```
 
 - [ ] **Step 3: 全量从零验收**
+
+> ⚠️ `down -v` 清空数据卷后需重建 Nacos 状态（管理员密码初始化 + 重新发布 order-service.yaml/gateway.yaml/auth-service.yaml + JWT 密钥回填 + 重启业务服务），步骤同 Task 6 Step 3 的 ⚠️ 块；JWT 密钥需与 verify-full.sh 的预期一致（用 Task 11 生成的同一密钥重新发布）。
 
 Run:
 ```bash
