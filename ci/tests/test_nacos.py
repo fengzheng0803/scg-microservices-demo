@@ -78,11 +78,30 @@ def nacos_token() -> str:
 
 @pytest.fixture
 def config_restore(nacos_token):
-    """保存 order-service.yaml 原文，teardown 时原样写回（热刷新测试的还原保证）。"""
+    """保存 order-service.yaml 原文，teardown 时原样写回（热刷新测试的还原保证）。
+
+    teardown 还原失败不得静默：try/except 包住后短等重试一次，仍失败则打印明确警告，
+    避免配置停留在 ttl:3s 影响后续测试与业务；还原异常也不会覆盖原测试结果
+    （原测试的通过/失败照常上报）。
+    """
     original = _get_config(nacos_token)["content"]
     yield original
-    _write_config(nacos_token, original)
-    time.sleep(1)  # 给配置客户端一点时间拉取还原值，避免后续测试撞上刷新窗口
+    restored = False
+    last_error = None
+    for attempt in range(2):  # 第一次直接还原；失败后短等 2s 重试一次
+        try:
+            _write_config(nacos_token, original)
+            restored = True
+            break
+        except Exception as exc:  # 网络/断言失败都算，不让 teardown 异常淹没原测试结果
+            last_error = exc
+            if attempt == 0:
+                time.sleep(2)
+    if not restored:
+        print(f"\nWARNING: Nacos 配置还原失败（已重试 2 次）: {last_error} "
+              f"— order-service.yaml 可能停留在 ttl:3s，请检查并手动还原为:\n{original}")
+    else:
+        time.sleep(1)  # 给配置客户端一点时间拉取还原值，避免后续测试撞上刷新窗口
 
 
 def test_nacos_services_registered(nacos_token):
@@ -126,7 +145,11 @@ def test_nacos_config_hot_refresh(api, cleanup, nacos_token, config_restore):
     m = re.search(r"ttl:\s*([0-9]+)s", original)
     assert m, f"配置中应有 ttl 秒值，实际内容: {original}"
     original_ttl = int(m.group(1))
-    assert original_ttl != 3, f"测试前提：原 ttl 不应是 3s（当前 {original_ttl}s）"
+    # 防假绿不变量（代码强制）：轮询窗口 8s 必须严格小于原 ttl，
+    # 否则轮询内观察到的 MISS 可能是"旧 ttl 自然过期"而非缓存重建/新 3s 过期，
+    # 测试会未刷新却判绿（例如原 ttl 漂移到 4-8s 时）
+    assert original_ttl > 8, \
+        f"测试前提：原 ttl 必须大于轮询窗口 8s（当前 {original_ttl}s），否则无法区分热刷新与新 ttl 过期"
 
     # 改配置：保持 YAML 结构，只把 ttl 换成 3s
     new_content = re.sub(r"ttl:\s*[0-9]+s", "ttl: 3s", original)
