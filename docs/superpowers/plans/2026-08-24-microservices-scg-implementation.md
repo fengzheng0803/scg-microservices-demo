@@ -1088,6 +1088,12 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
       <groupId>com.alibaba.cloud</groupId>
       <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
     </dependency>
+    <!-- spring.config.import: nacos:gateway.yaml 必需：nacos-config starter 提供 ConfigDataLoader，
+         仅 discovery starter 时启动报 "Config data resource does not exist" -->
+    <dependency>
+      <groupId>com.alibaba.cloud</groupId>
+      <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
