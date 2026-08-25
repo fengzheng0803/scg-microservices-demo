@@ -16,6 +16,13 @@ NACOS=http://localhost:8848
 CONSOLE=http://localhost:18080   # 宿主机映射的 3.x 控制台端口（容器内 8080）
 ADMIN_PASSWORD=nacos
 
+# 精确判断容器是否 healthy：字符串精确等于 "healthy"，容忍空值/starting/unhealthy
+# （不能用 grep 子串匹配：unhealthy 也含 healthy 子串；也不能用 grep -c 计数：
+#   零匹配退出码 1 在 set -o pipefail 下会触发 set -e 杀死脚本）
+is_healthy() {
+  [ "$(docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null)" = "healthy" ]
+}
+
 echo "== 等待 Nacos 就绪 =="
 READY=0
 for i in $(seq 1 75); do   # 75 * 2s = 150s
@@ -58,7 +65,7 @@ publish gateway.yaml $'logging:\n  level:\n    org.springframework.cloud.gateway
 
 echo "== 确保业务服务运行（未 healthy 时拉起，已 healthy 跳过）=="
 for svc in order-service gateway; do
-  if docker inspect -f '{{.State.Health.Status}}' "$svc" 2>/dev/null | grep -q healthy; then
+  if is_healthy "$svc"; then
     echo "[OK] $svc 已 healthy，跳过"
   else
     echo "[..] $svc 未 healthy（首启配置缺失可能已退出），执行 up -d 拉起..."
@@ -68,9 +75,12 @@ done
 
 echo "== 等待业务服务 healthy =="
 HEALTHY=0
-for i in $(seq 1 24); do   # 24 * 5s = 120s
-  N=$(docker inspect -f '{{.State.Health.Status}}' order-service gateway 2>/dev/null | grep -c healthy)
-  if [ "$N" = "2" ]; then HEALTHY=1; echo "[OK] order-service/gateway 全部 healthy"; break; fi
+for i in $(seq 1 24); do   # 24 * 5s = 120s；纯 bash 精确匹配，避免 grep 零匹配在 pipefail 下触发 set -e
+  if is_healthy order-service && is_healthy gateway; then
+    HEALTHY=1
+    echo "[OK] order-service/gateway 全部 healthy"
+    break
+  fi
   sleep 5
 done
 [ "$HEALTHY" = "1" ] || { echo "[FAIL] 业务服务未在 120s 内 healthy"; "${COMPOSE[@]}" ps; exit 1; }
