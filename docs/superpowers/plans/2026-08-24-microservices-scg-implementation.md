@@ -1140,20 +1140,24 @@ spring:
       server-addr: nacos:8848
       username: nacos
       password: nacos
+    # SCG 4.3.0（Spring Cloud 2025.0.0）属性前缀已迁移到 spring.cloud.gateway.server.webflux；
+    # 旧前缀 routes 靠兼容层暂时重映射，但 default-filters 不在重映射列表（静默不绑定），必须用新前缀
     gateway:
-      routes:
-        - id: order-service
-          uri: lb://order-service
-          predicates:
-            - Path=/api/order/**
-          filters:
-            - StripPrefix=1      # /api/order/orders -> order-service 的 /orders
-      default-filters:
-        - name: RequestRateLimiter
-          args:
-            redis-rate-limiter.replenishRate: 10
-            redis-rate-limiter.burstCapacity: 20
-            key-resolver: "#{@ipKeyResolver}"
+      server:
+        webflux:
+          routes:
+            - id: order-service
+              uri: lb://order-service
+              predicates:
+                - Path=/api/order/**
+              filters:
+                - StripPrefix=2    # 剥掉 /api + /order 两段：/api/order/orders -> /orders
+          default-filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                key-resolver: "#{@ipKeyResolver}"
   data:
     redis:
       host: redis
@@ -2922,12 +2926,12 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
 
 - [ ] **Step 5: 发布 gateway.yaml（含与 auth-service 相同的 JWT 密钥）+ 网关加 auth 路由**
 
-`gateway/src/main/resources/application.yml` 的 `spring.cloud.gateway.routes` 追加一条（auth-service 控制器映射的就是 `/api/auth`，**不加** StripPrefix）：
+`gateway/src/main/resources/application.yml` 的 `spring.cloud.gateway.server.webflux.routes` 追加一条（auth-service 控制器映射的就是 `/api/auth`，**不加** StripPrefix）：
 ```yaml
-        - id: auth-service
-          uri: lb://auth-service
-          predicates:
-            - Path=/api/auth/**
+            - id: auth-service
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/auth/**
 ```
 
 Run（`$JWT_SECRET` 用 Task 11 Step 5 生成的同一个值）：
