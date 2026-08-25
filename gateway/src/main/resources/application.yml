@@ -1,0 +1,42 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+  config:
+    import: nacos:gateway.yaml
+  cloud:
+    nacos:
+      server-addr: nacos:8848
+      username: nacos
+      password: nacos
+    # SCG 4.3.0（Spring Cloud 2025.0.0）属性前缀已由 spring.cloud.gateway 迁移到
+    # spring.cloud.gateway.server.webflux；旧前缀 routes 靠迁移器暂时重映射，
+    # 但 default-filters 不在重映射列表中（会静默不绑定），必须直接使用新前缀
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: order-service
+              uri: lb://order-service
+              predicates:
+                - Path=/api/order/**
+              filters:
+                - StripPrefix=2      # /api/order/orders -> order-service 的 /orders（order-service 映射在 /orders，需剥掉 /api + /order）
+          default-filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 10
+                redis-rate-limiter.burstCapacity: 20
+                key-resolver: "#{@ipKeyResolver}"
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
