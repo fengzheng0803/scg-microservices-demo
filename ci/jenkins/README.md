@@ -60,12 +60,15 @@ docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 > 无需手点向导（详见块 3 报告 `jenkins-3-report.md`）：
 >
 > ```bash
+> PW=$(docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword)  # 初始管理员密码
+> JAR=/tmp/jenkins-cookies.txt; rm -f $JAR
+> CRUMB=$(curl --noproxy '*' -s -c $JAR -b $JAR -u "admin:$PW" http://localhost:8088/crumbIssuer/api/json | jq -r .crumb)
 > # 1. 造作业（config.xml 为 flow-definition + CpsScmFlowDefinition，SCM 指向公开仓库）
-> curl --noproxy '*' -u admin:<密码> -H "Jenkins-Crumb: $(curl --noproxy '*' -u admin:<密码> -s http://localhost:8088/crumbIssuer/api/json | jq -r .crumb)" \
->   -X POST -H "Content-Type: application/xml" --data-binary @config.xml \
+> curl --noproxy '*' -s -b $JAR -u "admin:$PW" -H "Jenkins-Crumb: $CRUMB" \
+>   -H "Content-Type: application/xml" --data-binary @config.xml \
 >   "http://localhost:8088/createItem?name=scg-microservices-ci"
-> # 2. 触发构建
-> curl --noproxy '*' -u admin:<密码> -H "Jenkins-Crumb: <同上>" -X POST \
+> # 2. 触发构建（crumb 会话与 cookie jar 绑定，容器重启后需重新获取）
+> curl --noproxy '*' -s -b $JAR -u "admin:$PW" -H "Jenkins-Crumb: $CRUMB" -X POST \
 >   "http://localhost:8088/job/scg-microservices-ci/build"
 > ```
 >
