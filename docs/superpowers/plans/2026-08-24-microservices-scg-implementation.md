@@ -1094,6 +1094,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
       <groupId>com.alibaba.cloud</groupId>
       <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
     </dependency>
+    <!-- 路由 uri 用 lb://order-service 必需：ReactiveLoadBalancerClientFilter 来自 loadbalancer starter -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
