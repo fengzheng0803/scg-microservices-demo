@@ -13,7 +13,11 @@ pipeline {
         // 挂载的宿主仓库路径（机器相关，与 ci/jenkins/docker-compose.yml 的 volume 保持一致）
         REPO = '/home/fengzheng/new4'
         // 系统测试在 Jenkins 容器内运行：用服务名经 microservices-net 直连，不走宿主端口
-        BASE_URL = 'http://gateway:8080'
+        // （conftest 与各测试文件均已支持环境变量覆盖，缺省值面向宿主 localhost 运行）
+        BASE_URL = 'http://gateway:8080'   // 经网关访问订单服务
+        NACOS_URL = 'http://nacos:8848'    // test_nacos 直连 Nacos（控制台/客户端 API）
+        MYSQL_HOST = 'mysql-order'         // test_transaction 直连 MySQL
+        MYSQL_PORT = '3306'
     }
 
     stages {
@@ -93,7 +97,12 @@ pipeline {
             // --junitxml 直接写 $WORKSPACE（jenkins_home 卷内），供下一 stage 的 junit 步骤读取发布
             // （若写在 $REPO 宿主树里，junit 步骤读不到——它只认 workspace 相对路径）
             steps {
-                sh 'cd $REPO/ci/tests && python3 -m pytest -v --junitxml="$WORKSPACE/ci/tests/results.xml"'
+                sh '''
+                    cd $REPO/ci/tests
+                    # MySQL 密码随 .env 走（测试文件缺省 root123456，这里显式对齐挂载的 .env）
+                    export MYSQL_ROOT_PASSWORD=$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' $REPO/.env)
+                    python3 -m pytest -v --junitxml="$WORKSPACE/ci/tests/results.xml"
+                '''
             }
         }
 
