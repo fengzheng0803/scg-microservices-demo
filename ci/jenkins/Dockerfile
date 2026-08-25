@@ -22,9 +22,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
 #   - 流水线要操作宿主 Docker：构建微服务镜像、docker compose 拉起被测栈、跑容器化测试
 #   - 通过挂载 /var/run/docker.sock 连宿主 daemon（见 docker-compose.yml），容器内只需 CLI
 #   - 注：本基础镜像已是 Debian 13，docker.io 包只含 daemon（dockerd），CLI 拆到独立 docker-cli 包；
-#     与宿主 Docker 29.x 客户端协议兼容，学习场景够用
+#     与宿主 Docker 客户端协议兼容，学习场景够用
 RUN apt-get update && apt-get install -y --no-install-recommends docker-cli \
     && rm -rf /var/lib/apt/lists/*
+
+# docker compose v2 插件（块3 实测发现 docker-cli 包不带 compose 子命令）：
+#   - 按官方方式把插件二进制放进 /usr/local/lib/docker/cli-plugins/，`docker compose` 即可用
+#   - 版本对齐宿主机：`docker compose version` 查得 v5.2.0（协议兼容宿主 daemon）
+RUN mkdir -p /usr/local/lib/docker/cli-plugins \
+    && curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+         https://github.com/docker/compose/releases/download/v5.2.0/docker-compose-linux-x86_64 \
+    && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose \
+    && docker compose version
 
 # 恢复官方镜像默认用户；容器以 root 运行由 compose 的 user: root 控制
 # （root 仅为打通 docker.sock 权限，学习场景接受，见 docker-compose.yml 注释的 trade-off）

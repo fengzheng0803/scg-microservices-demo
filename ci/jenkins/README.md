@@ -7,7 +7,7 @@
 
 | 文件 | 作用 |
 |------|------|
-| `Dockerfile` | 定制镜像：官方 lts-jdk21 + 512MB 堆 + pytest 工具链 + docker CLI |
+| `Dockerfile` | 定制镜像：官方 lts-jdk21 + 512MB 堆 + pytest 工具链 + docker CLI + compose 插件 |
 | `docker-compose.yml` | 独立 compose：端口 8088、持久化卷、docker.sock、接入 microservices-net |
 | `ci/tests/` | pytest 系统测试套件（块 1 交付） |
 
