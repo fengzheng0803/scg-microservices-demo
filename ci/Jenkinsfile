@@ -24,6 +24,9 @@ pipeline {
                 // （ff-only：若宿主工作树有未提交修改/本地超前，宁可失败也不覆盖）
                 sh '''
                     cd $REPO
+                    # 容器内 git 以 root 运行，而仓库属主是宿主用户，git 会拒绝操作
+                    # （"dubious ownership"）——先标记 safe.directory 再执行 git 命令
+                    git config --global --add safe.directory "$REPO"
                     git fetch --prune origin
                     git checkout feature/scg-microservices
                     git pull --ff-only origin feature/scg-microservices
