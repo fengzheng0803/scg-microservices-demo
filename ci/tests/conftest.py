@@ -74,7 +74,7 @@ class ApiClient:
 def burst_requests(api: ApiClient, n: int) -> list:
     """并发发 n 个 GET 列表请求，返回状态码列表。
 
-    测限流/Redis 时用：并发打满令牌桶（burstCapacity=20，refill 10/s 追不上并发）。
+    测限流/Redis 时用：并发打满令牌桶（burstCapacity=40，refill 40/s 追不上并发）。
     每个线程独立发请求（不用共享 Session，避免线程安全边界问题）。
     """
     codes: list = []

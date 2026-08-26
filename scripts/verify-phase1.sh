@@ -25,7 +25,9 @@ curl -si --noproxy '*' $BASE/api/order/orders/$ID | grep -i 'x-cache\|HTTP/' || 
 curl -si --noproxy '*' $BASE/api/order/orders/$ID | grep -i 'x-cache\|HTTP/' || true
 
 echo "== 5. 网关全局兜底限流（快速连发，预期出现 429）=="
-for i in $(seq 1 25); do curl -s --noproxy '*' -o /dev/null -w "%{http_code} " $BASE/api/order/orders; done; echo
+# 40/40 桶（refill 40/s）下实测：本机串行 curl ≈ 82/s，净流出 42/s，桶 40 需 ~78 发才耗尽，
+# 故取 100 发（约第 78 发起出现 429）。50 发以内看不到 429（实测），勿缩回。
+for i in $(seq 1 100); do curl -s --noproxy '*' -o /dev/null -w "%{http_code} " $BASE/api/order/orders; done; echo
 
 echo "== 6. 网关与订单服务健康 =="
 curl -s --noproxy '*' $GATEWAY/actuator/health; echo
