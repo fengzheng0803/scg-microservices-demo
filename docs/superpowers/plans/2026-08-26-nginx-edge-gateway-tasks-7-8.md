@@ -36,17 +36,21 @@ Workflow agent 实测镜像内部结构：
 - **模板要点**：`env REDIS_HOST/REDIS_PORT` 声明（worker 里 os.getenv 读）、`resolver 127.0.0.11`（Docker DNS，供 cosocket 解析 Redis 主机名）、access_log 走 stdout、`/health` 返回 200。
 - 原模板只监听 8081 且仅 `/seckill` location——**我们挂载自己的模板**：listen 80、`location /` 全量转发 + `access_by_lua_file` 挂限流。
 
-### R2：SCG 全局兜底桶的容量（裁决，需用户确认）
+### R2：SCG 全局兜底桶的容量（裁决，用户批准后由实测修订）
 
 **冲突**：全局桶若维持 10/s+20 突发，3 客户端经 nginx 各 10/s 的正常流量（合计 30/s）会被 SCG 全拦——兜底桶变成主瓶颈，D1 的"兜底"语义不成立，Task 8 限流态断言（合计 30/s 通过）也必失败。
 
-**裁决建议**：SCG 全局桶 **replenishRate 10→100/s，burstCapacity 保持 20**。理由：
+**初裁（用户批准 2026-08-26）**：replenishRate 10→100/s，burstCapacity 保持 20。
 
-1. 兜底语义：正常负载（3×10=30/s）远低于 100/s，兜底不干扰正常流量；绕过 nginx 直连 8080 的洪水仍被 100/s 封顶（兜底仍起作用）
-2. 突发保持 20 不动 → **现有测试几乎零改动**：ci/tests/test_ratelimit.py（30 并发→≥3 个 429；随后 6 并发→≥1）、verify-phase1.sh（25 连发）都是**突发驱动**，20 突发不变则断言照旧成立
-3. 兜底演示：直连 gateway 8080 灌 2s×50 并发 ≈ 100 请求 → 约 20 通过 + 80 个 429，行为清晰可断言
+**实测修订（Task 7 实现者发现，控制器已核 SCG 4.3.0 源码确认）**：SCG 自带 `request_rate_limiter.lua` 有隐性约束 `ttl = floor(2 × capacity / rate)`，`ttl ≤ 0` 时不落盘桶状态 → **rate > 2×capacity（burst）时限流器静默失效**（每请求都读到空桶=满容量，永不 429，Redis 无 key）。100/20 → ttl=floor(0.4)=0 → 失效。证据：redis MONITOR 无写、150 并发直连 0×429、EVAL 三组对比。
 
-（备选：维持 10/20 不变——则 Task 8 限流态断言改为"合计 10/s 被 SCG 封顶"且 nginx/SCG 429 混在一起无法归因，演示价值低，不推荐。）
+**终裁：replenishRate = 40/s，burstCapacity = 20**。理由：
+
+1. 40/20 → ttl=1 > 0 → 限流器正常；40/s > 30/s 正常负载（33% 裕量），兜底不误伤、绕过 nginx 的洪水仍被 40/s 封顶
+2. burst=20 不变 → ci/tests/test_ratelimit.py（30 并发→≥3 个 429）、test_redis.py、verify-phase1.sh（25 连发）断言全部照旧成立（已由实现者实际跑 pytest 重验）
+3. 备选 100/100 被否：突发 100 使 30 并发 0×429，必须改 ci 断言数字，且削弱突发防护
+
+约束备忘（未来调参必须遵守）：**rate ≤ 2×burst**，否则限流器静默失效。
 
 ### R3：客户端容器形态（裁决）
 
