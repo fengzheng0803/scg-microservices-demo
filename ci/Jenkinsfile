@@ -67,7 +67,7 @@ pipeline {
         }
 
         stage('部署/确保栈运行') {
-            // docker compose up -d：确保阶段 1 六容器在跑且 healthy。
+            // docker compose up -d：确保全部容器在跑且 healthy。
             // 若镜像有更新，compose 按容器 label 配置哈希比对（与宿主 `docker compose up` 产出一致，
             // 已验证 config_files 标签相同），只会 recreate order-service，其余容器不动。
             steps {
@@ -75,13 +75,23 @@ pipeline {
                     set -e
                     cd $REPO
                     docker compose -f docker-compose.yml up -d
-                    # 等待 6 容器全部 healthy（最多 300s）。必须匹配 '(healthy)'（带左括号）：
-                    # "(unhealthy)" 也含 "healthy)" 子串，只匹配 ')' 会把 unhealthy 误判为健康
+                    # 等待全部容器 healthy（最多 300s）。必须匹配 '(healthy)'（带左括号）：
+                    # "(unhealthy)" 也含 "healthy)" 子串，只匹配 ')' 会把 unhealthy 误判为健康。
+                    # 按服务名逐个检查，不能用总数计数：容器数量变化（如加 nginx）时
+                    # "count -eq N" 会在某个服务未就绪时误判全绿（2026-08-26 构建 #8 的教训）。
+                    ALL_SERVICES="mysql-order mysql-nacos nacos redis gateway order-service nginx"
                     for i in $(seq 1 60); do
-                        count=$(docker compose -f docker-compose.yml ps \
-                            --format '{{.Service}} {{.Status}}' | grep -c '(healthy)')
-                        if [ "$count" -eq 6 ]; then
-                            echo "阶段 1 六容器全部 healthy"
+                        statuses=$(docker compose -f docker-compose.yml ps \
+                            --format '{{.Service}}:{{.Status}}')
+                        all_healthy=1
+                        for svc in $ALL_SERVICES; do
+                            if ! echo "$statuses" | grep -q "^${svc}:.*(healthy)"; then
+                                all_healthy=0
+                                break
+                            fi
+                        done
+                        if [ "$all_healthy" -eq 1 ]; then
+                            echo "全部容器 healthy"
                             exit 0
                         fi
                         sleep 5
