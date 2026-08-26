@@ -108,6 +108,14 @@ services:
     build: ./gateway
     image: microservices/gateway:latest
     container_name: gateway
+    environment:
+      # SCG 全局兜底桶参数（application.yml 占位符 ${SCG_RATE_LIMIT_RPS:40} 读取）。
+      # 用 shell 插值 ${VAR:-默认}：默认 40/40（SCG 4.3.0 断言 burstCapacity ≥ replenishRate，
+      # 40/20 无法配置，实测绑定抛异常静默回退 20/20；burst 最小只能等于 rate），容量态压测
+      # 以 `SCG_RATE_LIMIT_RPS=1000 SCG_RATE_LIMIT_BURST=2000 docker compose up -d` 放大。
+      # 注意遵守 SCG 约束 rate ≤ 2×burst，否则限流器静默失效。
+      SCG_RATE_LIMIT_RPS: ${SCG_RATE_LIMIT_RPS:-40}
+      SCG_RATE_LIMIT_BURST: ${SCG_RATE_LIMIT_BURST:-40}
     ports:
       - "8080:8080"
     depends_on:
@@ -133,6 +141,13 @@ services:
       BACKEND_HOST: gateway
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      # lua 限流阈值（lua/ratelimit.lua 读 os.getenv，默认 10/20）。
+      # 用 shell 插值 ${VAR:-默认}：默认 10/20（Task 7 行为不变），容量态压测
+      # 以 `RATE_LIMIT_RPS=1000 RATE_LIMIT_CAP=2000 docker compose up -d` 放大。
+      # nginx.conf.template 已声明 env RATE_LIMIT_RPS / env RATE_LIMIT_CAP，
+      # worker 里 os.getenv 才能读到（同 REDIS_HOST 机制）。
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
+      RATE_LIMIT_CAP: ${RATE_LIMIT_CAP:-20}
     ports:
       - "80:80"
     volumes:

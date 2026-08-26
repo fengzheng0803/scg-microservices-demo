@@ -6,3 +6,4 @@ target/
 .superpowers/
 .venv/
 __pycache__/
+reports/

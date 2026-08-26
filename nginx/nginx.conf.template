@@ -9,9 +9,11 @@ worker_processes auto;
 # 容器内日志走 stderr / stdout，docker logs 可见
 error_log stderr notice;
 
-# 让 worker 内 os.getenv 能读到这两个环境变量（lua/redis_conn.lua 使用）
+# 让 worker 内 os.getenv 能读到这些环境变量（lua/redis_conn.lua、ratelimit.lua 使用）
 env REDIS_HOST;
 env REDIS_PORT;
+env RATE_LIMIT_RPS;
+env RATE_LIMIT_CAP;
 
 events {
     worker_connections 1024;
