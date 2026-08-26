@@ -43,6 +43,22 @@ mvn spring-boot:run -Dspring-boot.run.arguments="--spring.cloud.nacos.server-add
 - 网关: http://localhost:8080/api/order/orders
 - WSL2 内存建议 ≥5GB
 
+### ⚠️ 8080/8081 是调试入口，不是生产形态
+
+本项目把 gateway(8080) 与 order-service(8081) 的端口直接发布到宿主机，是为了**便于逐层调试**
+（不经 nginx 直连网关、不经网关直连服务，用于隔离问题出在哪一跳）。
+
+真实生产中用户**只能访问边缘层**（nginx 的 80/443），网关与业务服务不对外暴露：
+
+| 部署形态 | 如何隔离 |
+|----------|----------|
+| 物理机 / VM | 服务绑内网 IP，或安全组只放行 nginx 所在主机 |
+| 云上 | 网关与服务置于私有子网，仅 nginx / ALB 在公有子网 |
+| Kubernetes | 服务为 ClusterIP（集群内可达），仅 Ingress 对外 |
+| Docker Compose | **删除 gateway / order-service 的 `ports:` 映射**，二者只在 `microservices-net` 内可达 |
+
+即：把 `docker-compose.yml` 中 gateway 与 order-service 的 `ports:` 两行删掉，本项目就是生产端口形态。
+
 ## Jenkins CI
 
 本地 Jenkins（独立 compose，按需启停，不随微服务栈启动）跑 `ci/Jenkinsfile` 流水线：
