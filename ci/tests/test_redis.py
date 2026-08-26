@@ -3,7 +3,7 @@
 
 关注点：
 - redis-cli ping 通：redis 容器内 redis 进程可连
-- 限流后 Redis 里有 request_rate_limiter.* 令牌桶 key（含 route id 与客户端 IP）
+- 限流后 Redis 里有 request_rate_limiter.* 令牌桶 key（含 route id 与全局桶 key "global"）
 先打空令牌桶产生限流 key，再断言 key 存在。
 """
 import os
@@ -24,9 +24,9 @@ def _docker_redis_cli(*args) -> subprocess.CompletedProcess:
 
 
 def test_redis_has_rate_limiter_keys(api):
-    """打空限流桶后：Redis 中应有 request_rate_limiter* 令牌桶 key。"""
-    # 先并发 25 个请求打空令牌桶：任何请求（放行或 429）都会经过限流器读写 Redis，
-    # 保证 Redis 里必然留下令牌桶 key
+    """限流器生效：Redis 中应有 request_rate_limiter* 令牌桶 key。"""
+    # 先并发 25 个请求（40/40 下 25 < 40 打不空桶，但放行与 429 都经过限流器读写 Redis，
+    # key 在放行时写入、ttl=2s 窗口内必然还在），保证 Redis 里留下令牌桶 key
     burst_requests(api, 25)
 
     # redis-cli ping：验证容器内 redis 进程可连（间接证明限流器写入的目标可访问）

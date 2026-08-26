@@ -40,7 +40,7 @@ class ApiClient:
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         """发请求；遇网关限流 429 时短等重试。
 
-        令牌桶是所有测试共用的（同一来源 IP），test_redis / test_ratelimit 会打空桶，
+        令牌桶是全局单桶（所有来源共享，key="global"），test_redis / test_ratelimit 会打空桶，
         后面的测试可能瞬间撞上 429。429 表示请求根本没到 order-service（幂等安全），
         重试即可让断言只关注业务结果、不被限流状态干扰。
         """
@@ -74,7 +74,7 @@ class ApiClient:
 def burst_requests(api: ApiClient, n: int) -> list:
     """并发发 n 个 GET 列表请求，返回状态码列表。
 
-    测限流/Redis 时用：并发打满令牌桶（burstCapacity=20，refill 10/s 追不上并发）。
+    测限流/Redis 时用：并发打满令牌桶（burstCapacity=40，refill 40/s 追不上并发）。
     每个线程独立发请求（不用共享 Session，避免线程安全边界问题）。
     """
     codes: list = []
