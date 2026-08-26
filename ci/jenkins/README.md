@@ -20,17 +20,25 @@
 docker compose -f ci/jenkins/docker-compose.yml up -d
 ```
 
-## 初始密码
+## 登录凭据
 
-安装向导（首次登录 http://localhost:8088）需要初始管理员密码，两种取法：
+当前登录：**`admin` / `admin`**（2026-08-26 由脚本控制台改密，学习环境用短密码）。
 
-```bash
-# 方式一：docker logs
-docker logs jenkins | grep -A2 "Initial admin password"
-
-# 方式二：容器内读文件
-docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
-```
+> 全新安装的首次启动：安装向导（首次登录 http://localhost:8088）需要**初始管理员密码**，两种取法：
+>
+> ```bash
+> # 方式一：docker logs
+> docker logs jenkins | grep -A2 "Initial admin password"
+>
+> # 方式二：容器内读文件
+> docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+> ```
+>
+> 改密后 `initialAdminPassword` 文件即失效（文件可能仍存在但内容不再可用）。
+> 改密方式：UI（右上角 admin → Configure → 密码），或脚本控制台：
+> `curl -u admin:<现密码> --data-urlencode "script=..." http://localhost:8088/scriptText`
+> （groovy：`def u = hudson.model.User.getById('admin', false); u.addProperty(hudson.security.HudsonPrivateSecurityRealm.Details.fromPlainPassword('<新密码>')); u.save()`）。
+> 改密只影响 Jenkins 自身的登录，**仓库代码与流水线不依赖 Jenkins 密码**（SCM 走公开仓库 HTTPS 无凭据）。
 
 ## 插件安装（最少集）
 
@@ -60,7 +68,7 @@ docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 > 无需手点向导（详见块 3 报告 `jenkins-3-report.md`）：
 >
 > ```bash
-> PW=$(docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword)  # 初始管理员密码
+> PW=admin  # 见「登录凭据」一节（initialAdminPassword 仅在全新安装首启时有效）
 > JAR=/tmp/jenkins-cookies.txt; rm -f $JAR
 > CRUMB=$(curl --noproxy '*' -s -c $JAR -b $JAR -u "admin:$PW" http://localhost:8088/crumbIssuer/api/json | jq -r .crumb)
 > # 1. 造作业（config.xml 为 flow-definition + CpsScmFlowDefinition，SCM 指向公开仓库）
