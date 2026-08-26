@@ -87,9 +87,11 @@ mvn spring-boot:run -Dspring-boot.run.arguments="--spring.cloud.nacos.server-add
 ### 关键实现说明
 
 - Jenkins 容器挂载 `docker.sock` 操作宿主 Docker，但 daemon 只认宿主路径；
-  因此 Jenkins compose 把仓库绑定挂载到**容器内宿主同路径** `/home/fengzheng/new4`
-  （不是 `/repo`——compose 的相对路径经 daemon 解析，挂在别的路径构建必失败），
-  流水线所有 compose/mvn/pytest 都在该路径下操作。
+  因此 Jenkins compose 把仓库绑定挂载到**容器内宿主同路径**（不是 `/repo`——compose 的相对路径
+  经 daemon 解析，挂在别的路径构建必失败），流水线所有 compose/mvn/pytest 都在该路径下操作。
+  路径已参数化：`REPO_PATH`（默认 `/home/fengzheng/new4`）是唯一事实源，定义在
+  `ci/jenkins/docker-compose.yml` 的插值与 environment 注入；换机器改 `.env` 或导出 `REPO_PATH` 即可，
+  流水线文件（`ci/Jenkinsfile` 的 `env.REPO_PATH`）无机器相关字面量。
 - 系统测试的 pytest 在 Jenkins 容器内跑，经 `microservices-net` 直连 `http://gateway:8080`（环境变量 `BASE_URL`）。
 - `post { always }` 兜底清理测试专用 userId 残留订单，失败不影响构建结果。
 

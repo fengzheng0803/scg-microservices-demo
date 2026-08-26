@@ -1,7 +1,8 @@
 // ci/Jenkinsfile —— 微服务最小集合的 CI 流水线（块 3）
 // 关键环境事实（务必先读 ci/jenkins/docker-compose.yml 的 volume 注释）：
 //   1. Jenkins 容器挂载 docker.sock 操作宿主 daemon，daemon 只认宿主路径
-//   2. 仓库已绑定挂载到容器内"宿主同路径" /home/fengzheng/new4，
+//   2. 仓库已绑定挂载到容器内"宿主同路径" REPO_PATH（唯一事实源在
+//      ci/jenkins/docker-compose.yml 的 ${REPO_PATH} 插值，同时注入 Jenkins 进程 env），
 //      所以流水线所有 docker 命令（-v 源路径、compose 的 -f 与相对路径）直接用宿主路径，
 //      容器内读文件、daemon 找目录两边一致，零翻译
 //   3. Jenkins 镜像不装 maven：单测用 maven 官方镜像容器跑
@@ -10,8 +11,9 @@ pipeline {
     agent any
 
     environment {
-        // 挂载的宿主仓库路径（机器相关，与 ci/jenkins/docker-compose.yml 的 volume 保持一致）
-        REPO = '/home/fengzheng/new4'
+        // 挂载的宿主仓库路径：来自 Jenkins 容器 env（compose 注入的 REPO_PATH）；
+        // 兜底默认值仅用于容器 env 未注入的场景（如非容器环境调试）
+        REPO = "${env.REPO_PATH ?: '/home/fengzheng/new4'}"
         // 系统测试在 Jenkins 容器内运行：用服务名经 microservices-net 直连，不走宿主端口
         // （conftest 与各测试文件均已支持环境变量覆盖，缺省值面向宿主 localhost 运行）
         BASE_URL = 'http://gateway:8080'   // 经网关访问订单服务
