@@ -44,13 +44,15 @@ Workflow agent 实测镜像内部结构：
 
 **实测修订（Task 7 实现者发现，控制器已核 SCG 4.3.0 源码确认）**：SCG 自带 `request_rate_limiter.lua` 有隐性约束 `ttl = floor(2 × capacity / rate)`，`ttl ≤ 0` 时不落盘桶状态 → **rate > 2×capacity（burst）时限流器静默失效**（每请求都读到空桶=满容量，永不 429，Redis 无 key）。100/20 → ttl=floor(0.4)=0 → 失效。证据：redis MONITOR 无写、150 并发直连 0×429、EVAL 三组对比。
 
-**终裁：replenishRate = 40/s，burstCapacity = 20**。理由：
+**终裁 v1：replenishRate = 40/s，burstCapacity = 20**（已被推翻，见下）。
 
-1. 40/20 → ttl=1 > 0 → 限流器正常；40/s > 30/s 正常负载（33% 裕量），兜底不误伤、绕过 nginx 的洪水仍被 40/s 封顶
-2. burst=20 不变 → ci/tests/test_ratelimit.py（30 并发→≥3 个 429）、test_redis.py、verify-phase1.sh（25 连发）断言全部照旧成立（已由实现者实际跑 pytest 重验）
-3. 备选 100/100 被否：突发 100 使 30 并发 0×429，必须改 ci 断言数字，且削弱突发防护
+**终裁 v2：replenishRate = 40/s，burstCapacity = 40**。Task 8 实现者发现（控制器已独立核 jar 常量池确认）：SCG 4.3.0 `RedisRateLimiter$Config.setBurstCapacity` **断言 `burstCapacity >= replenishRate`**，不满足抛异常 → 绑定静默回退构造默认 **20/20**。即 40/20 **没有任何配置路径可行**（Task 7 的"40/20 已验证"从未被稳态吞吐校验——其验收全部经 nginx 入口，断言对 20/20 同样通过）。实测：40/40 投 30/s 全放行、50/s 通过 41.9/s；40/20 投 30/s 约 10/s 被拒（实为 20/20 行为）。
 
-约束备忘（未来调参必须遵守）：**rate ≤ 2×burst**，否则限流器静默失效。
+40/40 满足全部约束：30/s 正常负载低于 40/s 兜底 ✓；断言 40≥40 ✓；ttl=floor(2×40/40)=2>0 ✓；容量态放大 1000/2000 ✓。40/40 是 rate=40 下合法最小 burst。
+
+**连带修复**（burst 20→40 使突发驱动断言失效）：ci/tests/test_ratelimit.py 触发并发 30→50、持续 6→15；verify-phase1.sh 25 连发→50；README/脚本注释数字同步。
+
+**约束备忘（唯一需要记住的）**：**burst ≥ rate**。推导：assert 要求 burst ≥ rate；ttl 约束 2×burst ≥ rate 自动被包含（burst ≥ rate ⇒ ttl ≥ 2）。此前"rate ≤ 2×burst"的备忘作废，被更强者替代。
 
 ### R3：客户端容器形态（裁决）
 
