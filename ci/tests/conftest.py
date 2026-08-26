@@ -40,7 +40,7 @@ class ApiClient:
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         """发请求；遇网关限流 429 时短等重试。
 
-        令牌桶是所有测试共用的（同一来源 IP），test_redis / test_ratelimit 会打空桶，
+        令牌桶是全局单桶（所有来源共享，key="global"），test_redis / test_ratelimit 会打空桶，
         后面的测试可能瞬间撞上 429。429 表示请求根本没到 order-service（幂等安全），
         重试即可让断言只关注业务结果、不被限流状态干扰。
         """

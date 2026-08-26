@@ -3,7 +3,7 @@
 
 关注点：
 - redis-cli ping 通：redis 容器内 redis 进程可连
-- 限流后 Redis 里有 request_rate_limiter.* 令牌桶 key（含 route id 与客户端 IP）
+- 限流后 Redis 里有 request_rate_limiter.* 令牌桶 key（含 route id 与全局桶 key "global"）
 先打空令牌桶产生限流 key，再断言 key 存在。
 """
 import os

@@ -8,13 +8,9 @@ import reactor.core.publisher.Mono;
 @Configuration
 public class RateLimiterConfig {
 
-    /** 限流维度：按客户端 IP */
+    /** 限流维度：全局兜底桶（所有请求共享一个桶，容量 40/s + 20 突发） */
     @Bean
-    public KeyResolver ipKeyResolver() {
-        return exchange -> {
-            var remote = exchange.getRequest().getRemoteAddress();
-            String ip = remote != null ? remote.getAddress().getHostAddress() : "unknown";
-            return Mono.just(ip);
-        };
+    public KeyResolver globalKeyResolver() {
+        return exchange -> Mono.just("global");
     }
 }

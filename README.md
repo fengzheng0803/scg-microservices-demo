@@ -5,8 +5,11 @@ Spring Cloud Gateway + Nacos 注册/配置 + Caffeine + Redis + 双 MySQL + Rabb
 
 ## 架构
 
-nginx(80) → gateway(8080, Nacos 发现 + Redis 令牌桶限流) → order-service(8081, Caffeine + MyBatis-Plus)
-Nacos(8848/9848, 数据存 mysql-nacos:3307) ｜ mysql-order(3306) ｜ redis(6379)
+nginx(80, OpenResty + lua 按客户端 IP 令牌桶限流 10/s+20) → gateway(8080, Nacos 发现 + Redis 全局兜底限流 40/s+20) → order-service(8081, Caffeine + MyBatis-Plus)
+Nacos(8848/9848, 数据存 mysql-nacos:3307) ｜ mysql-order(3306) ｜ redis(6379，nginx 与 gateway 共用限流桶存储)
+
+限流职责分层：**nginx 边缘层按客户端 IP 限流（主，每 IP 10/s + 20 突发）**；**SCG 全局兜底桶（副，全部请求共享 40/s + 20 突发）**——
+正常负载（3 客户端 × 10/s = 30/s）低于 40/s 兜底不误伤，绕过 nginx 直连 8080 的洪水仍被兜底封顶。
 
 ## 快速启动
 
@@ -27,6 +30,8 @@ compose 支持按服务名选择拉起，`depends_on` 自动带上依赖链（�
 | 全量拉起 | `docker compose up -d --build` |
 | 只测 order-service | `docker compose up -d --build order-service`（自动带 mysql-order + nacos） |
 | 只测网关链路 | `docker compose up -d --build gateway`（自动带 nacos + redis） |
+| 只测边缘层 | `docker compose up -d nginx`（自动带 gateway + redis；OpenResty 边缘网关 + lua 按 IP 限流） |
+| 拉起客户端容器 | `bash scripts/launch-clients.sh [N]`（默认 3 个独立 IP 客户端，N 可扩展；随后可跑 `bash scripts/verify-ratelimit-clients.sh` 验收限流） |
 | 只起基础设施 | `docker compose up -d mysql-order mysql-nacos nacos redis` |
 
 单独调试某个业务服务（断点开发）：基础设施常驻容器，该服务在 IDE 本地运行并指向宿主机端口：
@@ -38,9 +43,10 @@ mvn spring-boot:run -Dspring-boot.run.arguments="--spring.cloud.nacos.server-add
 
 ## 常用入口
 
+- 边缘层（nginx）: http://localhost/api/order/orders （用户入口，按 IP 限流 10/s+20）
 - Nacos 控制台: http://localhost:18080/ （nacos/nacos；3.x 控制台独立端口，8848 仅承载客户端 API）
 - 订单服务: http://localhost:8081/orders
-- 网关: http://localhost:8080/api/order/orders
+- 网关: http://localhost:8080/api/order/orders （调试入口；全局兜底限流 40/s+20）
 - WSL2 内存建议 ≥5GB
 
 ### ⚠️ 8080/8081 是调试入口，不是生产形态

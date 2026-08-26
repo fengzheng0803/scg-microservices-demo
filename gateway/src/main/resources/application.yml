@@ -27,9 +27,13 @@ spring:
           default-filters:
             - name: RequestRateLimiter
               args:
-                redis-rate-limiter.replenishRate: 10
+                # 全局兜底桶：正常负载（nginx 按 IP 限流 3×10/s=30/s）低于 40/s 兜底不误伤；
+                # 绕过 nginx 直连 8080 的洪水仍被 40/s 封顶。
+                # 注意：SCG 4.3.0 限流脚本 ttl=floor(capacity/rate*2)，rate>40（burst=20）时
+                # ttl=0 不写 Redis、限流器静默失效，故 rate 最大只能 40（实测验证）
+                redis-rate-limiter.replenishRate: 40
                 redis-rate-limiter.burstCapacity: 20
-                key-resolver: "#{@ipKeyResolver}"
+                key-resolver: "#{@globalKeyResolver}"
   data:
     redis:
       host: redis

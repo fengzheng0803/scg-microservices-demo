@@ -24,7 +24,7 @@ echo "== 4. 缓存命中（第一次 MISS，第二次 HIT）=="
 curl -si --noproxy '*' $BASE/api/order/orders/$ID | grep -i 'x-cache\|HTTP/' || true
 curl -si --noproxy '*' $BASE/api/order/orders/$ID | grep -i 'x-cache\|HTTP/' || true
 
-echo "== 5. 网关限流（快速连发，预期出现 429）=="
+echo "== 5. 网关全局兜底限流（快速连发，预期出现 429）=="
 for i in $(seq 1 25); do curl -s --noproxy '*' -o /dev/null -w "%{http_code} " $BASE/api/order/orders; done; echo
 
 echo "== 6. 网关与订单服务健康 =="

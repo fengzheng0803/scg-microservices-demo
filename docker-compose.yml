@@ -123,6 +123,34 @@ services:
       start_period: 60s
     networks: [microservices-net]
 
+  nginx:
+    # OpenResty 边缘网关：监听 80 → 转发 gateway:8080；lua 按客户端 IP 令牌桶限流（10/s+20）
+    # entrypoint 启动时用 envsubst '${BACKEND_HOST}' 渲染 nginx.conf.template
+    # 到 /usr/local/openresty/nginx/conf/nginx.conf（挂 nginx.conf 会被覆盖，只能挂模板）
+    image: seckill-gateway:local
+    container_name: nginx
+    environment:
+      BACKEND_HOST: gateway
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+      - ./nginx/lua:/etc/nginx/lua:ro
+    depends_on:
+      gateway:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # OpenResty alpine 是 ash 无 bash，不能用 /dev/tcp；镜像自带 busybox wget
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [microservices-net]
+
 networks:
   microservices-net:
     driver: bridge

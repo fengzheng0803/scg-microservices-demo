@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""网关限流：RequestRateLimiter（replenishRate=10, burstCapacity=20，按客户端 IP）。
+"""网关全局兜底限流：RequestRateLimiter（replenishRate=40, burstCapacity=20，全局单桶）。
 
 关注点：令牌桶满时直接连发不会出现 429（前 20 个请求放行），
-必须先快速打空桶，随后同一 IP 的请求才会被限流返回 429。
+必须先快速打空桶，随后请求才会被限流返回 429。
+（nginx 边缘层按客户端 IP 限流为 10/s+20；本测试直连 gateway，验证的是全局兜底桶的突发语义）
 """
 from conftest import burst_requests
 
