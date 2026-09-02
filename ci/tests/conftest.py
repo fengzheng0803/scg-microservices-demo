@@ -40,7 +40,7 @@ class ApiClient:
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         """发请求；遇网关限流 429 时短等重试。
 
-        令牌桶是全局单桶（所有来源共享，key="global"），test_redis / test_ratelimit 会打空桶，
+        令牌桶是全局单桶（gateway 本地内存桶，所有来源共享），test_redis / test_ratelimit 会打空桶，
         后面的测试可能瞬间撞上 429。429 表示请求根本没到 order-service（幂等安全），
         重试即可让断言只关注业务结果、不被限流状态干扰。
         """
@@ -49,7 +49,7 @@ class ApiClient:
             resp = self.session.request(method, url, timeout=10, **kwargs)
             if resp.status_code != 429 or time.time() > deadline:
                 return resp
-            time.sleep(0.6)  # 等令牌桶 refill（10/s）
+            time.sleep(0.6)  # 等令牌桶 refill（40/s → 0.6s 补 24 token）
 
     def create_order(self, user_id: int = 10001, product_name: str = "pytest测试商品",
                      amount: float = 88.88) -> dict:

@@ -1,5 +1,9 @@
 server:
   port: 8081
+  tomcat:
+    threads:
+      max: 400          # 兜底值；Nacos order-service.yaml 可覆盖（重启生效——Tomcat 执行器启动时创建，不热刷新）
+    accept-count: 100
 
 spring:
   application:
@@ -16,10 +20,20 @@ spring:
     url: jdbc:mysql://mysql-order:3306/order_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: ${MYSQL_ROOT_PASSWORD}
+    hikari:
+      maximum-pool-size: 20   # 兜底值；Nacos 可覆盖（重启生效，同 Tomcat 线程池）
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
 
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
+
+logging:
+  level:
+    com.example.order: INFO   # 显式声明业务包级别；Nacos order-service.yaml 可覆盖（热生效）
 
 management:
   endpoints:
@@ -30,5 +44,8 @@ management:
 # 本地兜底值；Nacos 的 order-service.yaml 会覆盖（热刷新）
 order:
   cache:
+    enabled: true
     ttl: 60s
     max-size: 100
+  lock:
+    enabled: true   # 订单金额修改加锁开关：true=synchronized 加锁 / false=不加锁（热刷新，无需重建）
