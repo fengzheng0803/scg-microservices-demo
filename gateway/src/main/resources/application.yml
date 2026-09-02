@@ -24,26 +24,16 @@ spring:
                 - Path=/api/order/**
               filters:
                 - StripPrefix=2      # /api/order/orders -> order-service 的 /orders（order-service 映射在 /orders，需剥掉 /api + /order）
-          default-filters:
-            - name: RequestRateLimiter
-              args:
-                # 全局兜底桶：正常负载（nginx 按 IP 限流 3×10/s=30/s）低于 40/s 兜底不误伤；
-                # 绕过 nginx 直连 8080 的洪水仍被 40/s 封顶。
-                # 注意：SCG 4.3.0 限流脚本 ttl=floor(capacity/rate*2)，rate>2×burst 时
-                # ttl=0 不写 Redis、限流器静默失效，故放大时必须保持 rate ≤ 2×burst（实测验证）
-                # 注意：SCG 4.3.0 的 RedisRateLimiter$Config.setBurstCapacity 断言
-                # burstCapacity >= replenishRate（实测：40/20 绑定抛异常、静默回退构造默认 20/20），
-                # 故 burst 最小只能等于 rate，默认 40/40（40/20 无法配置，Task 7 的"40/20"
-                # 从未真正生效——其断言对 20/20 同样通过）。
-                # 值来自环境变量占位符（compose 注入），默认 40/40；容量态压测经
-                # SCG_RATE_LIMIT_RPS / SCG_RATE_LIMIT_BURST 放大（如 1000/2000）
-                redis-rate-limiter.replenishRate: ${SCG_RATE_LIMIT_RPS:40}
-                redis-rate-limiter.burstCapacity: ${SCG_RATE_LIMIT_BURST:40}
-                key-resolver: "#{@globalKeyResolver}"
-  data:
-    redis:
-      host: redis
-      port: 6379
+
+# 全局兜底桶（Task 12 本地化：EdgeRateLimitBackstopFilter 本地内存令牌桶，不再查 Redis）：
+#   - 带 X-Edge-RateLimited 头（nginx 边缘已按 IP 限流）→ 跳过；
+#   - 直连 8080 的旁路流量 → LocalTokenBucket 本地判定（零网络往返，默认 40/40）。
+# 本地桶无 RedisRateLimiter 的 burst>=rate 硬断言（40/20 等配置也合法）。
+# 容量态压测经 SCG_RATE_LIMIT_RPS / SCG_RATE_LIMIT_BURST 放大（如 100000/200000）。
+scg:
+  rate-limit:
+    replenish-rate: ${SCG_RATE_LIMIT_RPS:40}
+    burst-capacity: ${SCG_RATE_LIMIT_BURST:40}
 
 management:
   endpoints:

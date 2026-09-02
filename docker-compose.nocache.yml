@@ -1,0 +1,9 @@
+# 无缓存容量压测（load-test.sh b5）的兜底 override：
+# Nacos 配置推送失败时用 `docker compose -f docker-compose.yml -f docker-compose.nocache.yml
+# up -d --build order-service` 重建，以环境变量关掉缓存（Spring 松绑定：
+# ORDER_CACHE_ENABLED=false -> order.cache.enabled=false，优先级高于 Nacos 配置）。
+# 测完后不带本文件重建即恢复 Nacos 配置语义。
+services:
+  order-service:
+    environment:
+      ORDER_CACHE_ENABLED: "false"

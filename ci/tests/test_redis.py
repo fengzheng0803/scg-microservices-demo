@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Redis 生效：网关限流器（RedisRateLimiter）把令牌桶存到 Redis。
+"""Redis 边界（Task 12 兜底限流本地化后）：
 
-关注点：
-- redis-cli ping 通：redis 容器内 redis 进程可连
-- 限流后 Redis 里有 request_rate_limiter.* 令牌桶 key（含 route id 与全局桶 key "global"）
-先打空令牌桶产生限流 key，再断言 key 存在。
+- redis-cli ping 通：redis 容器内 redis 进程可连（order-service 缓存、nginx 镜像写仍依赖）
+- 限流判定已全本地（nginx lua_shared_dict + gateway 内存桶）：
+  经 gateway 打突发流量后，Redis 里不应有任何限流 key（request_rate_limiter* / rate_limit:*）
+  ——防回归：若有人重新引入 Redis 限流器，此断言失败，逼出架构裁决
+  （原则：只有用户/业务维度的限流（需跨实例共享计数）才查 Redis）。
 """
 import os
 import subprocess
@@ -23,22 +24,22 @@ def _docker_redis_cli(*args) -> subprocess.CompletedProcess:
     )
 
 
-def test_redis_has_rate_limiter_keys(api):
-    """限流器生效：Redis 中应有 request_rate_limiter* 令牌桶 key。"""
-    # 先并发 25 个请求（40/40 下 25 < 40 打不空桶，但放行与 429 都经过限流器读写 Redis，
-    # key 在放行时写入、ttl=2s 窗口内必然还在），保证 Redis 里留下令牌桶 key
+def test_redis_reachable_and_limiter_keys_absent(api):
+    """Redis 可达；限流判定本地化后 Redis 中不应出现任何限流 key。"""
+    # 先并发 25 个请求（40/40 下 25 < 40 打不空桶，但放行与 429 都经过 gateway
+    # 的本地桶判定）——若限流器走 Redis，此刻必然留下 key
     burst_requests(api, 25)
 
-    # redis-cli ping：验证容器内 redis 进程可连（间接证明限流器写入的目标可访问）
+    # redis-cli ping：验证容器内 redis 进程可连（业务缓存/nginx 镜像的依赖仍在）
     pong = _docker_redis_cli("ping")
     assert pong.returncode == 0, f"docker exec redis-cli ping 执行失败: {pong.stderr}"
     assert pong.stdout.strip() == "PONG", \
         f"redis-cli ping 应返回 PONG，实际返回: {pong.stdout.strip()!r}"
 
-    # 限流 key 必须存在：请求经过 RedisRateLimiter 后应留下令牌桶键
-    keys = _docker_redis_cli("keys", "request_rate_limiter*")
-    assert keys.returncode == 0, f"docker exec redis-cli keys 执行失败: {keys.stderr}"
-    key_list = keys.stdout.strip().splitlines()
-    assert key_list, "限流请求后 Redis 中应有 request_rate_limiter* 键（令牌桶）"
-    assert any(k.endswith(".tokens") for k in key_list), \
-        f"应存在令牌桶 tokens 键，实际: {key_list}"
+    # 限流 key 必须不存在：本地化后限流判定零 Redis 写入
+    for pattern in ("request_rate_limiter*", "rate_limit:*"):
+        keys = _docker_redis_cli("keys", pattern)
+        assert keys.returncode == 0, f"docker exec redis-cli keys 执行失败: {keys.stderr}"
+        key_list = keys.stdout.strip().splitlines()
+        assert not key_list, \
+            f"限流已本地化，Redis 中不应有 {pattern} 键，实际: {key_list}"

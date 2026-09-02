@@ -20,6 +20,12 @@ events {
 }
 
 http {
+    # 本地限流桶（Task 12 优化：本地令牌桶 + Redis 配额预支，Redis 只当配额分配器）：
+    #   rate_limit_local  每 IP 本地桶状态（tokens|deny_until）
+    #   rate_limit_locks  resty.lock 每 IP 串行化锁（top-up 防惊群）
+    lua_shared_dict rate_limit_local 10m;
+    lua_shared_dict rate_limit_locks 1m;
+
     access_log /dev/stdout;
 
     # Docker 内置 DNS：redis_conn.lua 的 cosocket 用主机名（redis）连 Redis 时按此解析

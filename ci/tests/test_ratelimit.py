@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""网关全局兜底限流：RequestRateLimiter（replenishRate=40, burstCapacity=40，全局单桶）。
+"""网关全局兜底限流：本地内存令牌桶（rate=40, burst=40，全局单桶，Task 12 本地化）。
 
 关注点：令牌桶满时直接连发不会出现 429（前 40 个请求放行），
 必须先快速打空桶，随后请求才会被限流返回 429。

@@ -11,6 +11,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
+
 @RestController
 @RequestMapping("/orders")
 @RequiredArgsConstructor
@@ -39,10 +41,35 @@ public class OrderController {
                 .body(order);
     }
 
+    /** 慢库模拟端点：与 /orders/{id} 共享缓存，MISS 落库时 SQL 强制 SLEEP 50ms */
+    @GetMapping("/slow/{id}")
+    public ResponseEntity<Order> getSlow(@PathVariable Long id) {
+        Cache cache = cacheManager.getCache("orders");
+        boolean hit = cache != null && cache.get(id) != null;
+        Order order = orderService.getSlow(id);
+        if (order == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .header("X-Cache", hit ? "HIT" : "MISS")
+                .body(order);
+    }
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
         orderService.delete(id);
+    }
+
+    /** 修改订单金额（delta 语义：读-改-写，加锁/不加锁由 Nacos order.lock.enabled 热切换决定） */
+    @PatchMapping("/{id}/amount")
+    public ResponseEntity<Order> updateAmount(@PathVariable Long id,
+                                              @RequestParam BigDecimal delta) {
+        Order order = orderService.updateAmount(id, delta);
+        if (order == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(order);
     }
 
     @GetMapping

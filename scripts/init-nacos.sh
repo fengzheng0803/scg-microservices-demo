@@ -60,7 +60,7 @@ publish() {
     *) echo "[FAIL] 发布 $data_id: $resp"; exit 1 ;;
   esac
 }
-publish order-service.yaml $'order:\n  cache:\n    ttl: 10s\n    max-size: 100'
+publish order-service.yaml $'order:\n  cache:\n    ttl: 10s\n    max-size: 100\n  lock:\n    enabled: true\nlogging:\n  level:\n    com.example.order: INFO'
 publish gateway.yaml $'logging:\n  level:\n    org.springframework.cloud.gateway: INFO'
 
 echo "== 确保业务服务运行（未 healthy 时拉起，已 healthy 跳过）=="
